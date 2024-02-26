@@ -19,7 +19,7 @@
 // defines ---------------------------------------------------------------
 
 #define VERSION 199
-#define BUILD   002
+#define BUILD   003
 
 #define CALIB_COUNTS_PER_20V_DEFAULT 10022
 #define CALIB_COUNTS_OFFSET_0V_DEFAULT 123
@@ -44,8 +44,8 @@
 #define Regulator   PD0
 #define Enc_A       PD3  // (Encoder_Pin A)
 #define Enc_B       PD2  // (Encoder_Pin B)
-#define PHASE_A     (PIND & 1<<PD3)
-#define PHASE_B     (PIND & 1<<PD2)
+#define PHASE_A     (PIND & 1<<Enc_A)
+#define PHASE_B     (PIND & 1<<Enc_B)
 #define U_Mess		0 
 #define I_Mess		1
 #define T2_Mess		2
@@ -75,7 +75,10 @@
 #define Clear_Screen_cmd  0xF0
 #define All_on_Screen_cmd 0xF1
 
-
+#define MEAS_TYPE_U 0
+#define MEAS_TYPE_I 1
+#define MEAS_TYPE_T1 2
+#define MEAS_TYPE_T2 3
 
 // prototypes -------------------------------------------------------------
 void soft_delay (uint16_t time_value);
@@ -92,9 +95,10 @@ void init_Timer0(void);
 void init_Timer1(void);
 void init_Timer2(void);
 void start_Measurement_timer(void);
-void print_U_result(uint16_t mess_time);
-void print_I_result(uint16_t mess_time);
-void print_T1_result(uint16_t mess_time);
+void print_U_result(uint16_t meas_time);
+void print_I_result(uint16_t meas_time);
+void print_T1_result(uint16_t meas_time);
+void print_T2_result(uint16_t meas_time);
 void init_Encoder(void);
 void pull_encoder(void);
 int8_t encode_read4(void);
@@ -130,8 +134,8 @@ int8_t last;
 volatile uint8_t timer_max = 0;
 volatile uint8_t counter_h = 0;
 volatile uint8_t ADW_flag = 0;
-uint8_t Mess_phase = 0;
-uint8_t Mess_type = 0;
+uint8_t Meas_phase = 0;
+uint8_t Meas_type = MEAS_TYPE_U;
 volatile uint8_t Timer2_run_flag = 0;
 uint8_t Standby_flag = 0;
 uint8_t buttonState = 0;
@@ -160,9 +164,10 @@ uint8_t flash_time = 5;
 uint8_t blinki_flag = 0;
 int16_t Uist = 0;
 int16_t Iist = 0;
+#ifdef CONFIG_DISPLAY_AT_POWER
 uint8_t blinki_flag1 = 0;
 uint8_t flash_time1 = 0;
-uint8_t UI_switch = 0;
+#endif
 uint8_t digit[4];
 
 uint16_t calib_counts_per_20V    = CALIB_COUNTS_PER_20V_DEFAULT;
@@ -179,7 +184,7 @@ const uint8_t Standby_off[] PROGMEM = {4, Standby_Off_cmd, 0x22,0x03,0x1E};
     
 const uint8_t Degree_Symbol[] PROGMEM = {12, 0x23,0x02,0x31, 0x30,0x17,0x20, 0x30,0x26,0x38, 0x30,0x24,0x17};
     
-const uint8_t Activ_V[] PROGMEM = {6, 0x20,0x05,0x32, 0x27,0x03,0x1D};	
+const uint8_t Activ_V[] PROGMEM = {6, 0x20,0x05,0x32, 0x27,0x03,0x1D};
 const uint8_t Activ_A[] PROGMEM = {6, 0x27,0x03,0x32, 0x20,0x05,0x1D};
     
 const uint8_t clr_Memory[] PROGMEM = {8, 0x27,0x03,0x15, Memory_nr_cmd,0x5D,0x5D,0x5D,0x5D};
@@ -385,11 +390,12 @@ void print_degree(uint16_t value)
     value %= 100;
     digit[1] = (value/10)+0x50;
     value %= 10;
-    digit[2] = (value+0x50);
-    digit[3] = 0x52;					// "2" special for degree symbol
-    wr_SPI_buffer5(P_act_cmd, digit[3], digit[2], digit[1],digit[0]);
-    send_LCD_commands(Degree_Symbol);
-    wr_SPI_buffer3(0x23,0x03,0x1E);		// clr "W"
+    digit[2] = (value+0x50);    // dummy
+    digit[3] = 0x5C;            // dummy
+    wr_SPI_buffer5(Memory_nr_cmd, digit[3], digit[2], digit[1],digit[0]);
+    
+    //send_LCD_commands(Degree_Symbol);
+    //wr_SPI_buffer3(0x23,0x03,0x1E);		// clr "W"
 }
 
 //-------------------------------------------------------------------------
@@ -429,7 +435,7 @@ void start_Measurement_timer(void)
     OCR2B = 0;
     TCNT2 = 10;
         
-    if (Mess_phase == 3) {
+    if (Meas_phase == 3) {
         ADW_flag = 1;
     }
     else ADW_flag = 0;
@@ -452,13 +458,14 @@ void start_Measurement_timer(void)
 //*************************************************************************
 ISR (TIMER2_OVF_vect)
 {   
-  OCR2B++;
+    OCR2B++;
   
-  if (OCR2B == 48 && ADW_flag == 0){
-      TCCR2B &= ~((1<<CS00) | (1<<CS01));	// stop timer and disable ADC
-      PORTD |= ((1 << ADC_AD0) | (1<<ADC_AD1) | (1<<ADC_AD2));
-      Timer2_run_flag = 0;
-      }
+    if (OCR2B == 48 && ADW_flag == 0)
+    {
+        TCCR2B &= ~((1<<CS00) | (1<<CS01));	// stop timer and disable ADC
+        PORTD |= ((1 << ADC_AD0) | (1<<ADC_AD1) | (1<<ADC_AD2));
+        Timer2_run_flag = 0;
+   }
 }
 
 //*************************************************************************
@@ -467,28 +474,29 @@ ISR (TIMER2_OVF_vect)
 ISR(PCINT0_vect)
 {
     // falling edge
-    if (!(PINB & (1<<PB0))) {
+    if (!(PINB & (1<<PB0)))
+    {
         TCCR2B &= ~((1<<CS00) | (1<<CS01));	// stop timer and disable ADC
         PORTD |= ((1 << ADC_AD0) | (1<<ADC_AD1) | (1<<ADC_AD2));
         Timer2_run_flag = 0;
-        }
+    }
 }
 
 //*************************************************************************
 // print U_measurement result
 //*************************************************************************
-void print_U_result(uint16_t mess_time)
+void print_U_result(uint16_t meas_time)
 {
-    #define Digital_offset_v 162
-    //static int8_t count_v;
+    #define Digital_offset_v 163
     
-    if (Standby_flag == 1 || mess_time <= Digital_offset_v)
+    if (Standby_flag == 1 || meas_time <= Digital_offset_v)
     {
         print_value(U_act_cmd, 0);
+        print_value(P_act_cmd, 0);
         return;
     }
     
-    int16_t result = (((int32_t)mess_time - Digital_offset_v) * 198358) >> 16;
+    int16_t result = (((int32_t)meas_time - Digital_offset_v) * 189774) >> 16;
 
 #if 0    
     if (Ulimit > 0)
@@ -509,40 +517,47 @@ void print_U_result(uint16_t mess_time)
     
     print_value(U_act_cmd, result);
     Uist = result;
+
+    uint16_t watt = ((uint32_t) Uist * Iist)/10000;
+    print_value(P_act_cmd, watt);
+    
 }
 
 //*************************************************************************
 // print I_measurement result
 //*************************************************************************
-void print_I_result(uint16_t mess_time)
+void print_I_result(uint16_t meas_time)
 {
-    #define Digital_offset_a 155
+    #define Digital_offset_a 260
     
-    if (Standby_flag == 1 || mess_time <= Digital_offset_a) 
+    if (Standby_flag == 1 || meas_time <= Digital_offset_a) 
     {
         print_value(I_act_cmd, 0);
         Iist = 0;
         return;
     }
-    uint16_t result = (((uint32_t)mess_time - Digital_offset_a) * 15839) >> 16;	// 15805
+    uint16_t result = (((uint32_t)meas_time - Digital_offset_a) * 15725) >> 16;
     print_value(I_act_cmd, result);
     Iist = result;
+
+    uint16_t watt = ((uint32_t) Uist * Iist)/10000;
+    print_value(P_act_cmd, watt);
 }
 
 //*************************************************************************
 // print T1_measurement result (heat sink)
 //*************************************************************************
-void print_T1_result(uint16_t mess_time)
+void print_T1_result(uint16_t meas_time)
 {	
-    #define Digital_offset_b 5720  // 0.0'C
+    #define Digital_offset_b 6000  // Calibration to be done
     
-    //uint16_t result = (((uint32_t)mess_time - Digital_offset_b) * 3.035);
-    uint16_t result = (((uint32_t)mess_time - Digital_offset_b) * 198902) >> 16;
-    
+    uint16_t result = (((uint32_t)meas_time - Digital_offset_b) * 198902) >> 16;
+
+#ifdef CONFIG_DISPLAY_AT_POWER
     if (Iist > 0 && blinki_flag1 == 0 && flash_time1 > 0)
     {
-        uint16_t watt = ((uint32_t)Uist * Iist) /10000;
-        wr_SPI_buffer3(0x23,0x03,0x31);		// print "W"
+        uint16_t watt = ((uint32_t)Uist * Iist)/10000;
+        wr_SPI_buffer3(0x23,0x03,0x31);                 // print "W"
         print_value(P_act_cmd, watt);	
     }
     else if (Iist > 0 && blinki_flag1 == 1 && flash_time1 > 0){
@@ -557,8 +572,14 @@ void print_T1_result(uint16_t mess_time)
         {
             blinki_flag1 = 1;
         }
-            else blinki_flag1 = 0;
+        else blinki_flag1 = 0;
     }
+#else
+    if (!Memory_flag && !Recall_flag)
+    {
+        print_degree(result);
+    }        
+#endif
     
     result = result / 100;
         
@@ -591,6 +612,21 @@ void print_T1_result(uint16_t mess_time)
     }
 }
 
+
+//*************************************************************************
+// print T2_measurement result (transformer)
+//*************************************************************************
+void print_T2_result(uint16_t meas_time)
+{	
+    #define Digital_offset_b 6000  // Calibration to be done (shared with T1?)
+    
+    uint16_t result = (((uint32_t)meas_time - Digital_offset_b) * 198902) >> 16;
+    
+    if (!Memory_flag && !Recall_flag)
+    {
+        print_degree(result);
+    }        
+}    
 
 //*************************************************************************
 // Encoder
@@ -633,17 +669,21 @@ int8_t encode_read4(void)				// read four step encoders
 //*************************************************************************
 void Measurement(void)
 {
+    static uint8_t counter = 0;
+    
     // Abort when a measuring phase is running -----------------------
-    if (Timer2_run_flag == 1)		
+    if (Timer2_run_flag == 1)
     {
         return;
     }
+    
+    // print_value(P_act_cmd, Meas_phase*10+Meas_type); // For debugging
         
     // clear integrator ----------------- ----------------------------
-    if (Mess_phase == 0)
+    if (Meas_phase == 0)
     {
         // clear ADC
-        Mess_phase = 1;
+        Meas_phase = 1;
         Timer2_run_flag = 1;
         PORTD |= (1 << ADC_AD0) | (1 << ADC_AD2);
         PORTD &= ~(1<<ADC_AD1);
@@ -652,26 +692,31 @@ void Measurement(void)
     }
         
     // load integrator -----------------------------------------------
-    if (Mess_phase == 1)
+    if (Meas_phase == 1)
     {
         // clear flags
-        Mess_phase = 2;
+        Meas_phase = 2;
         Timer2_run_flag = 1;
             
-        // set measurement typ
-        if (Mess_type == 0)			// U_measurement
+        // set AD input
+        if (Meas_type == MEAS_TYPE_U)
         {
-            PORTD &= ~((1 << ADC_AD0) | (1<<ADC_AD1) | (1<<ADC_AD2));
+            PORTD &= ~((1 << ADC_AD0) | (1<<ADC_AD1) | (1<<ADC_AD2)); //AD-Input 0
         }
-        if (Mess_type == 1)			// I_measurement
+        if (Meas_type == MEAS_TYPE_I)
         {
-            PORTD &= ~((1 << ADC_AD1) | (1<<ADC_AD2));
-            PORTD |= (1 << ADC_AD0);
+            PORTD &= ~((1 << ADC_AD1) | (1<<ADC_AD2)); 
+            PORTD |= (1 << ADC_AD0);                                  // AD-Input 1
         }
-        if (Mess_type == 2)			// T1_measurement
+        if (Meas_type == MEAS_TYPE_T1)
         {
             PORTD &= ~(1<<ADC_AD2);
-            PORTD |= (1 << ADC_AD0) | (1<<ADC_AD1);
+            PORTD |= (1 << ADC_AD0) | (1<<ADC_AD1);                   // AD-Input 3
+        }
+        if (Meas_type == MEAS_TYPE_T2)
+        {
+            PORTD &= ~((1<<ADC_AD2) | (1<<ADC_AD0));
+            PORTD |=  (1<<ADC_AD1);                                   // AD-Input 2
         }
             
         start_Measurement_timer();
@@ -679,54 +724,72 @@ void Measurement(void)
     }
         
     // measurement integrator ----------------------------------------
-    if (Mess_phase == 2)
+    if (Meas_phase == 2)
     {
-        Mess_phase = 3;
+        Meas_phase = 3;
         Timer2_run_flag = 1;
         // start ADC measurement
         PORTD |= (1 << ADC_AD2);
         PORTD &= ~((1 << ADC_AD0) | (1<<ADC_AD1));
         start_Measurement_timer();
-        return;			
+        return;
     }
         
     // print measurement result ---------------------------------------
-    if (Mess_phase == 3)
+    if (Meas_phase == 3)
     {
         // read timer value for measurements
-        uint16_t mess_time = ((OCR2B << 8) | TCNT2);
+        uint16_t meas_time = ((OCR2B << 8) | TCNT2);
             
         ADW_flag = 0;
             
-        if (Mess_type == 0)
+        if (Meas_type == MEAS_TYPE_U)
         {
             if (change_Enc == FALSE && Hold_time == 0)
             {
-                print_U_result(mess_time);
+                print_U_result(meas_time);
             }
         }
             
-        if (Mess_type == 1)
+        if (Meas_type == MEAS_TYPE_I)
         {
             if (change_Enc == FALSE && Hold_time == 0)
             {
-                print_I_result(mess_time);
+                print_I_result(meas_time);
             }
         }
             
-        if (Mess_type == 2)
+        if (Meas_type == MEAS_TYPE_T1)
         {
-            print_T1_result(mess_time);
+            print_T1_result(meas_time);
         }
-            
-        Mess_type++;
-        if (Mess_type >= 3)
+
+        if (Meas_type == MEAS_TYPE_T2)
         {
-            Mess_type = 0;
+            print_T2_result(meas_time);
         }
+
+        // Get next measurement type; it doesn't make sense to read temperatures that often
+        counter++;
+        if (counter%50 == 0)
+        {
+            Meas_type = MEAS_TYPE_T1;
+        } 
+        else if (counter%25 == 0)
+        {
+            Meas_type = MEAS_TYPE_T2;
+        }
+        else if (counter%2 == 0)            
+        {
+            Meas_type = MEAS_TYPE_U;
+        }
+        else
+        {
+            Meas_type = MEAS_TYPE_I;
+        }                        
             
         // clear flags
-        Mess_phase = 0;
+        Meas_phase = 0;
         Timer2_run_flag = 0;
             
         // set UI-Limits
@@ -742,10 +805,10 @@ void Measurement(void)
             flash_time--;
         }
             
-        if (flash_time1 > 0)
-        {
-            flash_time1--;
-        }
+        //if (flash_time1 > 0)
+        //{
+        //  flash_time1--;
+        //}
     }
 }
 
@@ -754,7 +817,7 @@ void Measurement(void)
 //*************************************************************************
 void set_UI_Limits(void)
 {
-    if (Memory_flag != 0 || Recall_flag != 0)
+    if (Memory_flag || Recall_flag)
     {
         set_memory_nr();
         return;
@@ -770,7 +833,7 @@ void set_UI_Limits(void)
     else change_Enc = TRUE;
     
     // set Ulimit --------------------------------------------------------	
-    if (UI_flag == 0){
+    if (!UI_flag){
         Ulimit = Ulimit + (Multiplier * Enc_value);
         
         if (Ulimit < 0) {
@@ -791,7 +854,7 @@ void set_UI_Limits(void)
         set_Usoll(Ulimit);
         print_value(U_act_cmd, Ulimit);
 
-        Hold_time = 10;				// time before refresh UI-Limits
+        Hold_time = 30;				// time before refresh UI-Limits
         Refresh_Ulimit = TRUE;
         return;
     }
@@ -811,7 +874,7 @@ void set_UI_Limits(void)
         set_Isoll(Ilimit);
         print_value(I_act_cmd, Ilimit);
         
-        Hold_time = 10;
+        Hold_time = 30;
         Refresh_Ilimit = TRUE;
         return;
     }
@@ -1058,6 +1121,7 @@ void buttonFunction (uint8_t Button_nr)
         set_Isoll(Ilimit);
         //print_value(0x43,Ulimit);
         send_LCD_commands(Standby_off);
+        send_LCD_commands(Activ_V);
         Standby_flag = 0;
         if (Ulimit >= 15000) {
             SPI_wr2(Relais_On_48V);
@@ -1531,6 +1595,7 @@ void startup_calibration(void)
 
     send_LCD_commands(Standby_on);
     
+    wr_SPI_buffer3(0x27, 0x02, 0x15);           // clr "_"
     wr_SPI_buffer3(0x23, 0x05, 0x34);			// set "V"
     wr_SPI_buffer3(0x27, 0x03, 0x31);			// set "A"
     wr_SPI_buffer3(0x23, 0x03, 0x31);			// set "W"
