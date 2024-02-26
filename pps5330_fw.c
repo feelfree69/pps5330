@@ -19,10 +19,12 @@
 // defines ---------------------------------------------------------------
 
 #define VERSION 199
-#define BUILD   001
+#define BUILD   002
 
-#define CALIB_COUNTS_PER_20V_DEFAULT 10014UL
-#define CALIB_COUNTS_OFFSET_0V_DEFAULT 122
+#define CALIB_COUNTS_PER_20V_DEFAULT 10022
+#define CALIB_COUNTS_OFFSET_0V_DEFAULT 123
+#define CALIB_COUNTS_PER_1200MA_DEFAULT 5758
+#define CALIB_COUNTS_OFFSET_0MA_DEFAULT 118
 
 #define CALIB_MAGIC_WORD 0xca1
 
@@ -163,15 +165,17 @@ uint8_t flash_time1 = 0;
 uint8_t UI_switch = 0;
 uint8_t digit[4];
 
-uint16_t calib_counts_per_20V = CALIB_COUNTS_PER_20V_DEFAULT;
-uint16_t calib_counts_offset_0V = CALIB_COUNTS_OFFSET_0V_DEFAULT;
+uint16_t calib_counts_per_20V    = CALIB_COUNTS_PER_20V_DEFAULT;
+uint16_t calib_counts_offset_0V  = CALIB_COUNTS_OFFSET_0V_DEFAULT;
+uint16_t calib_counts_per_1200mA = CALIB_COUNTS_PER_1200MA_DEFAULT;
+uint16_t calib_counts_offset_0mA = CALIB_COUNTS_OFFSET_0MA_DEFAULT;
 
 //LCD commands -----------------------------------------------------------
 const uint8_t clr_Digit_Lines[] PROGMEM = {24, 0x24,0x07,0x1D, 0x24,0x06,0x15, 0x24,0x06,0x1D, 0x24,0x05,0x15, 
                                                0x27,0x01,0x1D, 0x27,0x01,0x15, 0x27,0x02,0x1D, 0x27,0x02,0x15};
     
-const uint8_t Standby_on[]  PROGMEM = {10, Standby_On_cmd,  0x22,0x03,0x31, 0x20,0x05,0x1D, 0x27,0x03,0x1D};
-const uint8_t Standby_off[] PROGMEM = {10, Standby_Off_cmd, 0x22,0x03,0x1E, 0x20,0x05,0x32, 0x27,0x03,0x1D};
+const uint8_t Standby_on[]  PROGMEM = {10, Standby_On_cmd, 0x22,0x03,0x31, 0x20,0x05,0x1D, 0x27,0x03,0x1D};
+const uint8_t Standby_off[] PROGMEM = {4, Standby_Off_cmd, 0x22,0x03,0x1E};
     
 const uint8_t Degree_Symbol[] PROGMEM = {12, 0x23,0x02,0x31, 0x30,0x17,0x20, 0x30,0x26,0x38, 0x30,0x24,0x17};
     
@@ -876,7 +880,6 @@ void save_print_UIlimit (void)
 void set_Usoll (uint16_t Usoll_value)
 {
     uint32_t calib_factor = (((uint32_t) calib_counts_per_20V << 16) + 10000) / 20000;
-
     OCR1A = calib_counts_offset_0V + ((Usoll_value * calib_factor) >> 16);
 }
 
@@ -884,10 +887,10 @@ void set_Usoll (uint16_t Usoll_value)
 //*************************************************************************
 // set Isoll
 //*************************************************************************
-void set_Isoll (int Isoll)
+void set_Isoll (int Isoll_value)
 {
-    const uint8_t offset = 160;
-    OCR1B = offset + (((int32_t)Isoll * 10000) / 2045);	// OCR1B 600=100mA 1200=230mA
+    uint32_t calib_factor = (((uint32_t) calib_counts_per_1200mA << 16) + 600) / 1200;
+    OCR1B = calib_counts_offset_0mA + ((Isoll_value * calib_factor) >> 16);
 }
 
 //*************************************************************************
@@ -946,25 +949,29 @@ void set_calibration_valid(void)
 }
 
 //*************************************************************************
-// set calibration data (eeprom Adr. 0x006, 0x008)
+// set calibration data (eeprom Adr. 0x006, 0x008, 0x00A, 0x00C)
 //*************************************************************************
 void save_calibration_data(void)
 {
     uint16_t *eeAddr = (uint16_t*) 6;
-    eeprom_write_word(eeAddr, calib_counts_offset_0V);
+    eeprom_write_word(eeAddr+0, calib_counts_offset_0V);
     eeprom_write_word(eeAddr+1, calib_counts_per_20V);
+    eeprom_write_word(eeAddr+2, calib_counts_offset_0mA);
+    eeprom_write_word(eeAddr+3, calib_counts_per_1200mA);
     
     set_calibration_valid();
 }
 
 //*************************************************************************
-// read calibration data (eeprom Adr. 0x006, 0x008)
+// read calibration data (eeprom Adr. 0x006, 0x008, 0x00A, 0x00C)
 //*************************************************************************
 void read_calibration_data(void)
 {
     uint16_t *eeAddr = (uint16_t*) 6;
-    calib_counts_offset_0V = eeprom_read_word(eeAddr);
-    calib_counts_per_20V = eeprom_read_word(eeAddr+1);
+    calib_counts_offset_0V  = eeprom_read_word(eeAddr);
+    calib_counts_per_20V    = eeprom_read_word(eeAddr+1);
+    calib_counts_offset_0mA = eeprom_read_word(eeAddr+2);
+    calib_counts_per_1200mA = eeprom_read_word(eeAddr+3);
 }
 
 
@@ -1396,6 +1403,37 @@ void init_UIlimits (void)
     UI_flag = 0;
 }
 
+int16_t calibration_user(uint16_t is_U)
+{
+    uint16_t ocrval_start = is_U ? OCR1A : OCR1B;
+    int16_t ocrval_diff = 0;
+    do
+    {
+        pull_encoder();
+        int diff = encode_read4();
+        ocrval_diff += diff;
+        if (is_U)
+            OCR1A = ocrval_start + ocrval_diff ;
+        else
+            OCR1B = ocrval_start + ocrval_diff ;
+        
+        print_value_signed(I_act_cmd, ocrval_diff);
+    } while ((PINC & (1<<B_Enter)) != 0);
+    
+    return ocrval_start + ocrval_diff;
+}        
+
+void wait_for_standby_off(void)
+{
+    do 
+    {
+        wr_SPI_buffer3(0x22,0x03,0x31);
+        soft_delay(200);
+        wr_SPI_buffer3(0x22,0x03,0x1E);
+        soft_delay(200);
+    } while ((PINC & (1<<B_Standby)) != 0);
+    send_LCD_commands(Standby_off);
+}    
 
 //*************************************************************************
 // Check calibration
@@ -1411,60 +1449,88 @@ void startup_calibration(void)
     {
         const uint16_t u_ref_low = 5000;
         const uint16_t u_ref_high = 25000;
+        const uint16_t i_ref_low = 300;     // use a 12V/5W car bulb as load
+        const uint16_t i_ref_high = 1500;   // use a 12V/21W car bulb as load
         
         // Limit current to 100mA; calibration should be done in idle anyway
         set_Isoll(100);
         print_value(I_limit_cmd, 100);
 
         uint16_t u_refs[] = { u_ref_low, u_ref_high };
+        uint16_t i_refs[] = { i_ref_low, i_ref_high };
         uint16_t ocrs[] = { 0, 0 };
+
+        wr_SPI_buffer5(P_act_cmd, 0x5D, 0x5D, 0x5D, 0x5D); // Clr P display
             
+        // Voltage calibration
         for (uint8_t i=0; i<2; i++)
         {
+            send_LCD_commands(Standby_on);
+            wr_SPI_buffer5(I_act_cmd, 0x5D, 0x5D, 0x5D, 0x5D); // Clr I display
+
             set_Usoll(u_refs[i]);
             wr_SPI_buffer5(U_act_cmd, 0x51+i, 0x5B, 0x5A ,0x5C);	// "CAL1/2"
-            wr_SPI_buffer3(0x27, 0x02, 0x38);			// "_"
+            wr_SPI_buffer3(0x23, 0x05, 0x34);                       //add "V"
             print_value(U_limit_cmd, u_refs[i]);
-            SPI_wr2(P_act_cmd);                         // Clr P display
-            wr_SPI_buffer5(P_act_cmd, 0x5D, 0x5D, 0x5D, 0x5D);
 
-            uint16_t ocrval_start = OCR1A;
-            int16_t ocrval_diff = 0;
+            wait_for_standby_off();
+            send_LCD_commands(Activ_V);
+            wr_SPI_buffer3(0x27, 0x02, 0x38);                       // "_"
 
-            send_LCD_commands(Standby_off);
             if (u_refs[i] >= 15000)
                 SPI_wr2(Relais_On_48V);
             else
                 SPI_wr2(Relais_Off_24V);
 
             soft_delay(200);
-    
-            do 
-            {
-                pull_encoder();
-                int diff = encode_read4();
-                ocrval_diff += diff;
-                OCR1A = ocrval_start + ocrval_diff ;
-                print_value_signed(I_act_cmd, ocrval_diff);
-            } while ((PINC & (1<<B_Enter)) != 0);
-
-            ocrs[i] = ocrval_start + ocrval_diff;
+            ocrs[i] = calibration_user(1);
         }
 
         calib_counts_per_20V = ocrs[1] - ocrs[0];
         calib_counts_offset_0V = ocrs[0] - calib_counts_per_20V / 4;   // subtract 5V to get offset @0V
 
+        //wr_SPI_buffer5(U_act_cmd, 0x5D, 0x5B, 0x5A, 0x5C);  // "CAL"
+        //print_value(I_act_cmd, calib_counts_per_20V/2);     // Print Counts per 10V (we have only 4 digits!) (~5005)
+        //print_value(P_act_cmd, calib_counts_offset_0V);		// Print offset (~122)
+        //soft_delay(5000);
+
+        // Current calibration
+        set_Usoll(12000);           // 12V
+        SPI_wr2(Relais_Off_24V);
+        print_value(U_limit_cmd, 12000);
+
+        for (uint8_t i=0; i<2; i++)
+        {
+            send_LCD_commands(Standby_on);
+            wr_SPI_buffer5(I_act_cmd, 0x5D, 0x5D, 0x5D, 0x5D);      // Clr I display
+            wr_SPI_buffer3(0x23, 0x05, 0x19);                       // remove "V"
+            wr_SPI_buffer3(0x27, 0x03, 0x31);                       // add "A"
+
+            set_Isoll(i_refs[i]);
+            wr_SPI_buffer5(U_act_cmd, 0x53+i, 0x5B, 0x5A ,0x5C);	// "CAL3/4"
+            print_value(I_limit_cmd, i_refs[i]);
+
+            wait_for_standby_off();
+            send_LCD_commands(Activ_A);
+
+            soft_delay(200);
+            ocrs[i] = calibration_user(0);
+        }
+
+        calib_counts_per_1200mA = ocrs[1] - ocrs[0];
+        calib_counts_offset_0mA = ocrs[0] - calib_counts_per_1200mA / 4;   // subtract 300mA get offset @0mA
+
+        //wr_SPI_buffer5(U_act_cmd, 0x5D, 0x5B, 0x5A, 0x5C);  // "CAL"
+        //print_value(I_act_cmd, calib_counts_per_1200mA);    // Print Counts per 1200mA) (~6000)
+        //print_value(P_act_cmd, calib_counts_offset_0mA);    // Print offset (~120)
+        //soft_delay(5000);
+
         save_calibration_data();
 
-        wr_SPI_buffer5(U_act_cmd, 0x5D, 0x5B, 0x5A, 0x5C);	// "CAL"
-        print_value(I_act_cmd, calib_counts_per_20V/2);		// Print Counts per 10V (we have only 4 digits!) (~5005)
-        print_value(P_act_cmd, calib_counts_offset_0V);		// Print offset (~122)
-
-        soft_delay(5000);
     }
 
     send_LCD_commands(Standby_on);
-
+    
     wr_SPI_buffer3(0x23, 0x05, 0x34);			// set "V"
     wr_SPI_buffer3(0x27, 0x03, 0x31);			// set "A"
     wr_SPI_buffer3(0x23, 0x03, 0x31);			// set "W"

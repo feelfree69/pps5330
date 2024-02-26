@@ -3,15 +3,18 @@
 The PPS5330 Power supply is controlled by an ATMEGA88PA microcontroller.
 The firmware has been developed from scratch by Rolf D., see this thread in the german forum: https://www.mikrocontroller.net/topic/499101
 
-Current status:
+WORKING:
 - All Basic functionality is working, the Power Supply is in a usable state 
 - Added Temperature measuring of the internal heatsink with display on LCD 
-- Voltage Calibration done
+- Voltage Calibration 
+- Current Calibration
 
 TO DO:
-- Current Calibration
 - Calibration of internal ADC measurements
-- Menu with LCD contrast/backlit settings
 
+NICE TO HAVE:
+- Menu with LCD contrast/backlit settings
+- Temperature compensation (if needed)
+- Measure transformer temperature
 
 
