@@ -21,12 +21,12 @@ WORKING:
 - Voltage Calibration 
 - Current Calibration
 - Measure transformer temperature
+- Menu with LCD contrast/backlit settings (TODO: currently this is blocking normal program flow)
 
 TO DO:
 - Calibration of internal ADC measurements
 
 NICE TO HAVE:
-- Menu with LCD contrast/backlit settings
 - Temperature compensation (if needed)
 
 ## HISTORY
