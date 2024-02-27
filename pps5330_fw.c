@@ -19,7 +19,7 @@
 // defines ---------------------------------------------------------------
 
 #define VERSION 199
-#define BUILD   003
+#define BUILD   004
 
 #define CALIB_COUNTS_PER_20V_DEFAULT 10022
 #define CALIB_COUNTS_OFFSET_0V_DEFAULT 123
@@ -71,6 +71,7 @@
 #define Relais_On_48V   0xB1
 #define Backlit_off_cmd 0xC0
 #define Backlit_on_cmd  0xC1
+#define LCD_Contrast_cmd  0xD8
 #define LCD_Firmware_cmd  0xE0
 #define Clear_Screen_cmd  0xF0
 #define All_on_Screen_cmd 0xF1
@@ -79,6 +80,18 @@
 #define MEAS_TYPE_I 1
 #define MEAS_TYPE_T1 2
 #define MEAS_TYPE_T2 3
+
+#define UI_FLAG_U 0
+#define UI_FLAG_I 1
+
+#define BUTTON_STANDBY 0
+#define BUTTON_LEFT 1
+#define BUTTON_RIGHT 2
+#define BUTTON_UI 3
+#define BUTTON_RECALL 4
+#define BUTTON_MEMORY 5
+#define BUTTON_ENTER 6
+#define BUTTON_COUNT 7
 
 // prototypes -------------------------------------------------------------
 void soft_delay (uint16_t time_value);
@@ -107,24 +120,26 @@ void set_UI_Limits(void);
 void save_print_UIlimit (void);
 void set_Usoll (uint16_t Usoll_value);
 void set_Isoll (int Isoll);
-void save_Ulimit (uint16_t Ulimit);
-void save_Ilimit (uint16_t Ilimit);
-void read_Ulimit (void);
-void read_Ilimit (void);
+void save_eeprom_ulimit(uint16_t ulim);
+void save_eeprom_ilimit(uint16_t ilim);
+uint16_t read_eeprom_ulimit(void);
+uint16_t read_eeprom_ilimit(void);
+void wr_eeprom_memory(uint8_t nr, uint16_t ulim, uint16_t ilim);
+void rd_eeprom_memory(uint8_t nr, uint16_t *ulim, uint16_t *ilim);
 void setDigitPos (void);
 void buttonFunction (uint8_t Button_nr);
 void pressButton (uint8_t Button_nr);
-void lessButton (uint8_t Button_nr);
-void readButton (void);
+void releaseButton (uint8_t Button_nr);
+void readButtons(void);
 void UI_control(void);
 void init_LCD (void);
 void init_UIlimits (void);
 void send_LCD_commands (const uint8_t Com_Adr[]);
 void print_degree(uint16_t value);
 void set_memory_nr (void);
-void wr_UI_eeprom(void);
-void rd_UI_eeprom (void);
 void flash_PrgNo(void);
+void displaySettings(void);
+void printContrast(uint8_t contrast);
 
 
 // global variables ------------------------------------------------------
@@ -142,20 +157,15 @@ uint8_t buttonState = 0;
 uint8_t buttonDebounce = 0;
 int32_t Usoll = 0;
 int Isoll = 0;
-int32_t Ulimit = 0;
-int32_t Ilimit = 0;
+uint16_t Ulimit = 0;
+uint16_t Ilimit = 0;
 uint8_t change_Enc = 0;
-int Multiplier = 1000;
-int Multiplier_2 = 100;
-uint8_t Button_nr_old = 0;
+int Multiplier_U = 1000;
+int Multiplier_I = 100;
 uint8_t UI_flag = 0;
-uint8_t Daten_Buffer[3];
 uint8_t Hold_time = 0;
 uint8_t Refresh_Ulimit = FALSE;
 uint8_t Refresh_Ilimit = FALSE;
-uint8_t Button5_flag = 0;
-uint8_t Button6_flag = 0;
-uint8_t Button7_flag = 0;
 uint8_t Memory_flag = 0;
 int8_t Memory_nr = 0;
 uint8_t Recall_flag = 0;
@@ -164,11 +174,13 @@ uint8_t flash_time = 5;
 uint8_t blinki_flag = 0;
 int16_t Uist = 0;
 int16_t Iist = 0;
-#ifdef CONFIG_DISPLAY_AT_POWER
+#ifdef CONFIG_TEMP_DISPLAY_AT_POWER
 uint8_t blinki_flag1 = 0;
 uint8_t flash_time1 = 0;
 #endif
-uint8_t digit[4];
+uint32_t buttonPressDuration[BUTTON_COUNT];
+uint32_t buttonReleaseDuration[BUTTON_COUNT];
+
 
 uint16_t calib_counts_per_20V    = CALIB_COUNTS_PER_20V_DEFAULT;
 uint16_t calib_counts_offset_0V  = CALIB_COUNTS_OFFSET_0V_DEFAULT;
@@ -193,7 +205,19 @@ const uint8_t LCD_inits[] PROGMEM = {60, 0x23,0x05,0x34, 0x23,0x06,0x34, 0x27,0x
                                          0x23,0x02,0x31, 0x30,0x17,0x20, 0x30,0x26,0x38, 0x30,0x24,0x17,
                                          0x00,0x23,0x38, 0x04,0x20,0x38, 0x04,0x21,0x38, 0x04,0x27,0x34,
                                          0x23,0x05,0x31, 0x27,0x05,0x31, 0x24,0x06,0x38,
-                                         U_act_cmd,0x5D,0x50,0x50,0x50,  I_act_cmd,0x50,0x50,0x50,0x50, P_act_cmd,0x50,0x50,0x50,0x50};
+                                         U_act_cmd,0x5D,0x50,0x50,0x50,  
+                                         I_act_cmd,0x50,0x50,0x50,0x50, 
+                                         P_act_cmd,0x50,0x50,0x50,0x50};      
+
+const uint8_t restore_unit_display[] PROGMEM = {15, 0x23,0x05,0x34, 0x27,0x03,0x31, 0x23,0x03,0x31,
+                                                    0x23,0x06,0x34, 0x27,0x01,0x34 };
+
+const uint8_t clr_unit_display[] PROGMEM = {15, 0x23,0x05,0x19, 0x27,0x03,0x1E, 0x23,0x03,0x1E,
+                                                0x23,0x06,0x1B, 0x27,0x01,0x19 };
+const uint8_t clr_all_digits[] PROGMEM = { 15, U_act_cmd,0x5D, 0x5D, 0x5D, 0x5D, 
+                                               I_act_cmd,0x5D, 0x5D, 0x5D, 0x5D, 
+                                               P_act_cmd,0x5D, 0x5D, 0x5D, 0x5D };
+
 
 //*************************************************************************
 // soft delay
@@ -324,7 +348,7 @@ void init_IO_Port(void)
 void print_value(uint8_t cmd_index, uint16_t value)
 {
     uint8_t print_leading_space = 0;
-    
+    uint8_t digit[4];
     if (cmd_index == U_act_cmd || cmd_index == U_limit_cmd)
     {
         value /= 10;
@@ -348,6 +372,7 @@ void print_value(uint8_t cmd_index, uint16_t value)
 
 void print_value_signed(uint8_t cmd_index, int16_t value)
 {
+    uint8_t digit[4];
     if (value < 0)
     {
         value = -value;
@@ -375,6 +400,7 @@ void print_value_signed(uint8_t cmd_index, int16_t value)
 //*************************************************************************
 void print_memory_nr (uint8_t number)
 {
+    uint8_t digit[4];
     digit[0] = (number/10) + 0x50;
     digit[1] = (number%10) + 0x50;
     wr_SPI_buffer5(Memory_nr_cmd, 0x5D, 0x5D, digit[1], digit[0]);
@@ -385,6 +411,7 @@ void print_memory_nr (uint8_t number)
 //*************************************************************************
 void print_degree(uint16_t value)
 {
+    uint8_t digit[4];
     value /= 10;
     digit[0] = (value/100)+0x50;
     value %= 100;
@@ -496,7 +523,7 @@ void print_U_result(uint16_t meas_time)
         return;
     }
     
-    int16_t result = (((int32_t)meas_time - Digital_offset_v) * 189774) >> 16;
+    Uist = (((int32_t)meas_time - Digital_offset_v) * 189774) >> 16;
 
 #if 0    
     if (Ulimit > 0)
@@ -515,8 +542,7 @@ void print_U_result(uint16_t meas_time)
     }
 #endif
     
-    print_value(U_act_cmd, result);
-    Uist = result;
+    print_value(U_act_cmd, Uist);
 
     uint16_t watt = ((uint32_t) Uist * Iist)/10000;
     print_value(P_act_cmd, watt);
@@ -536,9 +562,8 @@ void print_I_result(uint16_t meas_time)
         Iist = 0;
         return;
     }
-    uint16_t result = (((uint32_t)meas_time - Digital_offset_a) * 15725) >> 16;
-    print_value(I_act_cmd, result);
-    Iist = result;
+    Iist = (((uint32_t)meas_time - Digital_offset_a) * 15725) >> 16;
+    print_value(I_act_cmd, Iist);
 
     uint16_t watt = ((uint32_t) Uist * Iist)/10000;
     print_value(P_act_cmd, watt);
@@ -553,7 +578,7 @@ void print_T1_result(uint16_t meas_time)
     
     uint16_t result = (((uint32_t)meas_time - Digital_offset_b) * 198902) >> 16;
 
-#ifdef CONFIG_DISPLAY_AT_POWER
+#ifdef CONFIG_TEMP_DISPLAY_AT_POWER
     if (Iist > 0 && blinki_flag1 == 0 && flash_time1 > 0)
     {
         uint16_t watt = ((uint32_t)Uist * Iist)/10000;
@@ -575,7 +600,7 @@ void print_T1_result(uint16_t meas_time)
         else blinki_flag1 = 0;
     }
 #else
-    if (!Memory_flag && !Recall_flag)
+    if (! (Memory_flag || Recall_flag))
     {
         print_degree(result);
     }        
@@ -622,7 +647,7 @@ void print_T2_result(uint16_t meas_time)
     
     uint16_t result = (((uint32_t)meas_time - Digital_offset_b) * 198902) >> 16;
     
-    if (!Memory_flag && !Recall_flag)
+    if (! (Memory_flag || Recall_flag))
     {
         print_degree(result);
     }        
@@ -833,8 +858,9 @@ void set_UI_Limits(void)
     else change_Enc = TRUE;
     
     // set Ulimit --------------------------------------------------------	
-    if (!UI_flag){
-        Ulimit = Ulimit + (Multiplier * Enc_value);
+    if (UI_flag == UI_FLAG_U)
+    {
+        Ulimit = Ulimit + (Multiplier_U * Enc_value);
         
         if (Ulimit < 0) {
             Ulimit = 0;
@@ -860,8 +886,9 @@ void set_UI_Limits(void)
     }
     
     // set Ilimit --------------------------------------------------------
-    else if (UI_flag == 1){
-        Ilimit = Ilimit + (Multiplier_2 * Enc_value);
+    else if (UI_flag == UI_FLAG_I)
+    {
+        Ilimit = Ilimit + (Multiplier_I * Enc_value);
         
         if (Ilimit < 0) {
             Ilimit = 0;
@@ -906,7 +933,7 @@ void set_memory_nr (void)
         Memory_nr = 0;
     }
     print_memory_nr(Memory_nr);
-    
+     
     blinki_flag = 0;
     flash_time = 3;
 }
@@ -918,18 +945,18 @@ void save_print_UIlimit (void)
 {
     uint8_t Temp_flag = UI_flag;		// save UI_flag
     
-    if (Hold_time == 0 && Refresh_Ulimit == TRUE)
+    if (Hold_time == 0 && Refresh_Ulimit)
     {
-        UI_flag = 0;
-        save_Ulimit(Ulimit);
+        UI_flag = UI_FLAG_U;
+        save_eeprom_ulimit(Ulimit);
         print_value(U_limit_cmd, Ulimit);
         Refresh_Ulimit = FALSE;
     }
     
-    if (Hold_time == 0 && Refresh_Ilimit == TRUE)
+    if (Hold_time == 0 && Refresh_Ilimit)
     {
-        UI_flag = 1;
-        save_Ilimit(Ilimit);
+        UI_flag = UI_FLAG_I;
+        save_eeprom_ilimit(Ilimit);
         print_value(I_limit_cmd, Ilimit);
         Refresh_Ilimit = FALSE;
     }
@@ -957,43 +984,43 @@ void set_Isoll (int Isoll_value)
 }
 
 //*************************************************************************
-// save Ulimit (EEPROM Adr. 0x000)
+// save Ulimit (EEPROM addr. 0x000)
 //*************************************************************************
-void save_Ulimit (uint16_t Ulimit)
+void save_eeprom_ulimit(uint16_t ulim)
 {
     uint16_t *eeAddr = (uint16_t*) 0;
-    eeprom_write_word(eeAddr, Ulimit);
+    eeprom_write_word(eeAddr, ulim);
 }
 
 //*************************************************************************
-// read Ulimit (EEPROM Adr. 0x000)
+// read Ulimit (EEPROM addr. 0x000)
 //*************************************************************************
-void read_Ulimit (void)
+uint16_t read_eeprom_ulimit(void)
 {
     uint16_t *eeAddr =  (uint16_t*) 0;
-    Ulimit = eeprom_read_word(eeAddr);
+    return eeprom_read_word(eeAddr);
 }
 
 //*************************************************************************
-// save Ilimit (eeprom Adr. 0x002)
+// save Ilimit (eeprom addr. 0x002)
 //*************************************************************************
-void save_Ilimit (uint16_t Ilimit)
+void save_eeprom_ilimit(uint16_t ilim)
 {
     uint16_t *eeAddr = (uint16_t*) 2;
-    eeprom_write_word(eeAddr, Ilimit);
+    eeprom_write_word(eeAddr, ilim);
 }
 
 //*************************************************************************
-// read Ilimit (eeprom Adr. 0x002)
+// read Ilimit (eeprom addr. 0x002)
 //*************************************************************************
-void read_Ilimit (void)
+uint16_t read_eeprom_ilimit (void)
 {
     uint16_t *eeAddr = (uint16_t*) 2;
-    Ilimit = eeprom_read_word(eeAddr);
+    return eeprom_read_word(eeAddr);
 }
 
 //*************************************************************************
-// read magic_calib (eeprom Adr. 0x004)
+// read magic_calib (eeprom addr. 0x004)
 //*************************************************************************
 uint8_t is_calibration_valid(void)
 {
@@ -1003,7 +1030,7 @@ uint8_t is_calibration_valid(void)
 }
 
 //*************************************************************************
-// set magic_calib (eeprom Adr. 0x004)
+// set magic_calib (eeprom addr. 0x004)
 //*************************************************************************
 void set_calibration_valid(void)
 {
@@ -1012,7 +1039,7 @@ void set_calibration_valid(void)
 }
 
 //*************************************************************************
-// set calibration data (eeprom Adr. 0x006, 0x008, 0x00A, 0x00C)
+// set calibration data (eeprom addr. 0x006, 0x008, 0x00A, 0x00C)
 //*************************************************************************
 void save_calibration_data(void)
 {
@@ -1026,7 +1053,7 @@ void save_calibration_data(void)
 }
 
 //*************************************************************************
-// read calibration data (eeprom Adr. 0x006, 0x008, 0x00A, 0x00C)
+// read calibration data (eeprom addr. 0x006, 0x008, 0x00A, 0x00C)
 //*************************************************************************
 void read_calibration_data(void)
 {
@@ -1037,50 +1064,56 @@ void read_calibration_data(void)
     calib_counts_per_1200mA = eeprom_read_word(eeAddr+3);
 }
 
+//*************************************************************************
+// save display settings (eeprom addr. 0x00E)
+//*************************************************************************
+void save_eeprom_display_settings(uint8_t contrast, uint8_t backlit)
+{
+    uint16_t *eeAddr = (uint16_t*) 0x0e;
+    uint16_t word = (contrast & 0x07) | (backlit & 0x01)<<7 | 0xcc00;
+    eeprom_write_word(eeAddr, word);
+}
+
+//*************************************************************************
+// save display settings (eeprom addr. 0x00E)
+//*************************************************************************
+void read_eeprom_display_settings(uint8_t *contrast, uint8_t *backlit)
+{
+    uint16_t *eeAddr = (uint16_t*) 0x0e;
+    uint16_t word = eeprom_read_word(eeAddr);
+    if ((word & 0xff00) == 0xcc00)
+    {
+        // Setting valid
+        *contrast = word & 0x07;
+        *backlit = (word & 0x80) >> 7;
+    }
+    else
+    {
+        // Setting invalid, use default
+        *contrast = 7;
+        *backlit = 1;
+    }
+}
+
 
 //*************************************************************************
 // set Voltage Digit Line 
 //*************************************************************************
 void setDigitPos (void)
 {
-    // Voltage Digit Line ------------------------------------------------
-    if (UI_flag == FALSE) {
-        if (Multiplier == 10)	
-        {
-            wr_SPI_buffer3(0x24,0x05,0x38);
-        }
-        else if (Multiplier == 100)
-        {
-            wr_SPI_buffer3(0x24,0x06,0x32);
-        }
-        else if (Multiplier == 1000)
-        {
-            wr_SPI_buffer3(0x24,0x06,0x38);
-        }
-        else if (Multiplier == 10000)
-        {
-            wr_SPI_buffer3(0x24,0x07,0x32);
-        }
+    if (UI_flag == UI_FLAG_U) 
+    {
+        if      (Multiplier_U == 10)    wr_SPI_buffer3(0x24,0x05,0x38);
+        else if (Multiplier_U == 100)   wr_SPI_buffer3(0x24,0x06,0x32);
+        else if (Multiplier_U == 1000)  wr_SPI_buffer3(0x24,0x06,0x38);
+        else if (Multiplier_U == 10000) wr_SPI_buffer3(0x24,0x07,0x32);
     }
-    
-    // Ampere Digit Line -------------------------------------------------
-    else {		
-        if (Multiplier_2 == 1)
-        {
-            wr_SPI_buffer3(0x27,0x02,0x38);
-        }
-        else if (Multiplier_2 == 10)
-        {
-            wr_SPI_buffer3(0x27,0x02,0x32);
-        }
-        else if (Multiplier_2 == 100)
-        {
-            wr_SPI_buffer3(0x27,0x01,0x38);
-        }
-        else if (Multiplier_2 == 1000)
-        {
-            wr_SPI_buffer3(0x27,0x01,0x32);
-        }
+    else 
+    {
+        if      (Multiplier_I == 1)     wr_SPI_buffer3(0x27,0x02,0x38);
+        else if (Multiplier_I == 10)    wr_SPI_buffer3(0x27,0x02,0x32);
+        else if (Multiplier_I == 100)   wr_SPI_buffer3(0x27,0x01,0x38);
+        else if (Multiplier_I == 1000)  wr_SPI_buffer3(0x27,0x01,0x32);
     }
 }
 
@@ -1089,301 +1122,322 @@ void setDigitPos (void)
 //*************************************************************************
 void send_LCD_commands (const uint8_t Com_Adr[])
 {
-    uint8_t counts = pgm_read_byte (Com_Adr);
-    
+    uint8_t counts = pgm_read_byte(Com_Adr);
     for (uint8_t i = 1; i <= counts; i++)
     {
-        SPI_wr2(pgm_read_byte (Com_Adr + i));
+        SPI_wr2(pgm_read_byte(Com_Adr + i));
     }
 }
 
 //*************************************************************************
 // Button function
 //*************************************************************************
-void buttonFunction (uint8_t Button_nr)
+void buttonFunction (uint8_t button)
 {
-    // Standby on -------------------------------------------------------- 
-    if (Button_nr == 1 && Standby_flag == 0) {
-        send_LCD_commands(Standby_on);
-        set_Isoll(0);
-        set_Usoll(0);
-        print_value(U_act_cmd, 0);
-        print_value(I_act_cmd, 0);
-        Standby_flag = 1;
-        return;
-    }
-    
-    // Standby off -------------------------------------------------------
-    else if (Button_nr == 1 && Standby_flag == 1) {
-        read_Ulimit();		// read Ulimit from EEPROM
-        read_Ilimit();
-        set_Usoll(Ulimit);
-        set_Isoll(Ilimit);
-        //print_value(0x43,Ulimit);
-        send_LCD_commands(Standby_off);
-        send_LCD_commands(Activ_V);
-        Standby_flag = 0;
-        if (Ulimit >= 15000) {
-            SPI_wr2(Relais_On_48V);
+    switch (button)
+    {
+        case BUTTON_STANDBY: 
+        {
+            // Standby on -------------------------------------------------------- 
+            if (Standby_flag == 0) {
+                send_LCD_commands(Standby_on);
+                set_Isoll(0);
+                set_Usoll(0);
+                print_value(U_act_cmd, 0);
+                print_value(I_act_cmd, 0);
+                Standby_flag = 1;
+            }
+            else // Standby off -------------------------------------------------------
+            {
+                Ulimit = read_eeprom_ulimit();
+                Ilimit = read_eeprom_ilimit();
+                set_Usoll(Ulimit);
+                set_Isoll(Ilimit);
+                //print_value(0x43,Ulimit);
+                send_LCD_commands(Standby_off);
+                send_LCD_commands(Activ_V);
+                Standby_flag = 0;
+                if (Ulimit >= 15000)
+                    SPI_wr2(Relais_On_48V);
+                else if (Ulimit <= 14500)
+                    SPI_wr2(Relais_Off_24V);
+             }                    
         }
-        else if (Ulimit <= 14500) {
-            SPI_wr2(Relais_Off_24V);
+        break;            
+
+        case BUTTON_LEFT:
+        {
+            // Voltage digit Up "<--"
+            if (UI_flag == UI_FLAG_U) 
+            {
+                if (Multiplier_U < 10000) 
+                {
+                    Multiplier_U *= 10;
+                    send_LCD_commands(clr_Digit_Lines);
+                    setDigitPos();
+                }                    
+            }
+            else
+            {
+            // Ampere digit Up "<--" ----------------------------------------------
+                if (Multiplier_I < 1000) 
+                {
+                    Multiplier_I *=  10;
+                    send_LCD_commands(clr_Digit_Lines);
+                    setDigitPos();
+                }
+            }                
         }
-        return;
-    }
-    // set Voltage Up "<--" ----------------------------------------------
-    else if (Button_nr == 2 && UI_flag == 0) {
-        if (Multiplier < 10000) {
-            Multiplier = Multiplier * 10;
-            send_LCD_commands(clr_Digit_Lines);
-            setDigitPos();
-        } return;
-    }
-    // set Ampere Up "<--" ----------------------------------------------
-    else if (Button_nr == 2 && UI_flag == 1) {
-        if (Multiplier_2 < 1000) {
-            Multiplier_2 = Multiplier_2 * 10;
-            send_LCD_commands(clr_Digit_Lines);
-            setDigitPos();
-        } return;
-    }
+        break;
     
-    // set Voltage Down "-->" --------------------------------------------
-    else if (Button_nr == 3 && UI_flag == 0) {
-        if (Multiplier > 10) {
-            Multiplier = Multiplier / 10;
-            send_LCD_commands(clr_Digit_Lines);
+        case BUTTON_RIGHT:
+        {
+            if (UI_flag == UI_FLAG_U) 
+            {
+                // Voltage digit Down "-->"
+                if (Multiplier_U > 10) 
+                {
+                    Multiplier_U /= 10;
+                    send_LCD_commands(clr_Digit_Lines);
+                }
+            }                                    
+            else
+            {
+                // set Ampere Down "-->"
+                if (Multiplier_I > 1) 
+                {
+                    Multiplier_I /= 10;
+                    send_LCD_commands(clr_Digit_Lines);
+                }
+            }                                    
             setDigitPos();
-        } return;
-    }
+        } 
+        break;
     
-    // set Ampere Down "-->" ---------------------------------------------
-    else if (Button_nr == 3 && UI_flag == 1) {
-        if (Multiplier_2 > 1) {
-            Multiplier_2 = Multiplier_2 / 10;
+        case BUTTON_UI:
+        {
             send_LCD_commands(clr_Digit_Lines);
+            if (UI_flag == UI_FLAG_U) 
+                UI_flag = UI_FLAG_I;
+            else 
+                UI_flag = UI_FLAG_U;
             setDigitPos();
-        } return;
-    }
-    
-    // UI switch ---------------------------------------------------------
-    else if (Button_nr == 4) {
-        send_LCD_commands(clr_Digit_Lines);
-        if (UI_flag == FALSE) {
-            UI_flag = TRUE;
-            setDigitPos();
-            return;
         }
-        else {
-            UI_flag = FALSE;
-            setDigitPos();
-        } return;		
-    }
+        break;
     
-    //  "Recall" ---------------------------------------------------------
-    else if (Button_nr == 5) {
-        if (Button5_flag == 0){
-        wr_SPI_buffer3(0x27, 0x03, 0x38);	// print "Memory"
-        print_memory_nr(Memory_nr);
-        Memory_flag = 0;
-        Recall_flag = 1;
-        Button5_flag = 1;
-        flash_time = 5;			// flash-time for PrgNo
-        return;
-        }
-        else{
-            send_LCD_commands(clr_Memory);
-            Button5_flag = 0;
-            Button6_flag = 0;
+        case BUTTON_RECALL:
+        {
+            if (Recall_flag == 0)
+            {
+                wr_SPI_buffer3(0x27, 0x03, 0x38);	// print "Memory"
+                print_memory_nr(Memory_nr);
+                Recall_flag = 1;
+                flash_time = 5;                     // flash-time for PrgNo
+            }
+            else
+            {
+                send_LCD_commands(clr_Memory);
+                print_value(U_limit_cmd, Ulimit);
+                print_value(I_limit_cmd, Ilimit);
+                Recall_flag = 0;
+            }
             Memory_flag = 0;
-            Recall_flag = 0;
-            return;
         }
+        break;            
         
-    }
-    
-    //  "Memory" ---------------------------------------------------------
-    else if (Button_nr == 6) {
-        if (Button6_flag == 0){
-            wr_SPI_buffer3(0x27, 0x03, 0x38);	// print "Memory"
-            print_memory_nr(Memory_nr);
-            Button6_flag = 1;
-            Memory_flag = 1;
-            Recall_flag = 0;
-            flash_time = 5;		// flash-time for PrgNo
-            return;
-        }
-        else{
-            send_LCD_commands(clr_Memory);
-            Button5_flag = 0;
-            Button6_flag = 0;
-            Memory_flag = 0;
-            Recall_flag = 0;
-            return;
-        }	
-    }
-    
-    //  "Enter" ---------------------------------------------------------
-    else if (Button_nr == 7 && Button7_flag == 0){
-        if (Memory_flag == 0 && Recall_flag == 1){ 
-            rd_UI_eeprom();
-            uint8_t temp_flag = UI_flag;	// save flag
-            UI_flag = 0;
-            if (Ulimit >= 15000) {
-                SPI_wr2(Relais_On_48V);
+        case BUTTON_MEMORY:
+        {
+            if (Memory_flag == 0)
+            {
+                wr_SPI_buffer3(0x27, 0x03, 0x38);	// print "Memory"
+                print_memory_nr(Memory_nr);
+                Memory_flag = 1;
+                flash_time = 5;                     // flash-time for PrgNo
             }
-            else if (Ulimit <= 14500) {
-                SPI_wr2(Relais_Off_24V);
+            else
+            {
+                send_LCD_commands(clr_Memory);
+                Memory_flag = 0;
             }
-            set_Usoll(Ulimit);
-            print_value(U_limit_cmd, Ulimit);
-            UI_flag = 1;
-            set_Isoll(Ilimit);
-            print_value(I_limit_cmd, Ilimit);
-            send_LCD_commands(clr_Memory);
-            UI_flag = temp_flag;
+            Recall_flag = 0;
+        }
+        break;
+    
+        case BUTTON_ENTER:
+        {
+            if (Recall_flag == 1)
+            { 
+                rd_eeprom_memory(Memory_nr, &Ulimit, &Ilimit);
+                uint8_t temp_flag = UI_flag;	// save flag
+                UI_flag = UI_FLAG_U;
+                if (Ulimit >= 15000) 
+                {
+                    SPI_wr2(Relais_On_48V);
+                }
+                else if (Ulimit <= 14500) 
+                {
+                    SPI_wr2(Relais_Off_24V);
+                }
+                set_Usoll(Ulimit);
+                print_value(U_limit_cmd, Ulimit);
+                UI_flag = UI_FLAG_I;
+                set_Isoll(Ilimit);
+                print_value(I_limit_cmd, Ilimit);
+                send_LCD_commands(clr_Memory);
+                UI_flag = temp_flag;
+                Hold_time = 0;				// time before refresh UI-Limits
+                Refresh_Ulimit = TRUE;
+                Refresh_Ilimit = TRUE;
+            }
+            else if (Memory_flag == 1)
+            {
+                wr_eeprom_memory(Memory_nr, Ulimit, Ilimit);
+                send_LCD_commands(clr_Memory);
+            }
             Memory_flag = 0;
             Recall_flag = 0;
-            Button5_flag = 0;
-            Button6_flag = 0;
-            Button7_flag = 0;
-            Hold_time = 0;				// time before refresh UI-Limits
-            Refresh_Ulimit = TRUE;
-            Refresh_Ilimit = TRUE;
         }
-        else if (Memory_flag == 1 && Recall_flag == 0){
-            wr_UI_eeprom();
-            send_LCD_commands(clr_Memory);
-            Memory_flag = 0;
-            Recall_flag = 0;
-            Button5_flag = 0;
-            Button6_flag = 0;
-            Button7_flag = 0;
-        }
-    }
+        break;
+       
+        default:
+        break;
+     }               
 }
 
 //*************************************************************************
-// flaching Memory PrgNo
+// flashing Memory PrgNo
 //*************************************************************************
 void flash_PrgNo (void)
 {
-    if ((Memory_flag != 0 || Recall_flag != 0) && flash_time == 0){
-        if (blinki_flag != 0){
+    if ((Memory_flag != 0 || Recall_flag != 0) && flash_time == 0)
+    {
+        if (blinki_flag != 0)
+        {
             print_memory_nr(Memory_nr);		// print PrgNo
-            blinki_flag = 0;
-            flash_time = 3;
+            if (Recall_flag != 0)
+            {
+                uint16_t ilim;
+                uint16_t ulim;
+                rd_eeprom_memory(Memory_nr, &ulim, &ilim);
+                print_value(U_limit_cmd, ulim);
+                print_value(I_limit_cmd, ilim);
+            }
         }
-        else{
+        else
+        {
             wr_SPI_buffer5(Memory_nr_cmd, 0x5D, 0x5D, 0x5D, 0x5D);
-            blinki_flag = 1;
-            flash_time = 3;
+            if (Recall_flag != 0)
+            {
+                wr_SPI_buffer5(U_limit_cmd, 0x5D, 0x5D, 0x5D, 0x5D);
+                wr_SPI_buffer5(I_limit_cmd, 0x5D, 0x5D, 0x5D, 0x5D);
+            }
         }
+        blinki_flag = !blinki_flag;
+        flash_time = 3;
     }
 } 
 
 //*************************************************************************
 // save UI data to Memory
 //*************************************************************************
-void wr_UI_eeprom (void)
+void wr_eeprom_memory (uint8_t nr, uint16_t ulim, uint16_t ilim)
 {
-    uint16_t *eeAddr = (uint16_t*) (0x10 + (Memory_nr * 4));
-    eeprom_write_word(eeAddr, Ulimit);
-    eeprom_write_word(eeAddr+1, Ilimit);
+    uint16_t *eeAddr = (uint16_t*) (0x10 + (nr * 4));
+    eeprom_write_word(eeAddr, ulim);
+    eeprom_write_word(eeAddr+1, ilim);
 }
 
 //*************************************************************************
 // read UI data from Memory
 //*************************************************************************
-void rd_UI_eeprom (void)
+void rd_eeprom_memory (uint8_t nr, uint16_t *ulim, uint16_t *ilim)
 {
-    uint16_t *eeAddr = (uint16_t*) (0x10 + (Memory_nr * 4));
-    Ulimit = eeprom_read_word(eeAddr);
-    Ilimit = eeprom_read_word(eeAddr+1);
+    uint16_t *eeAddr = (uint16_t*) (0x10 + (nr * 4));
+    *ulim = eeprom_read_word(eeAddr);
+    *ilim = eeprom_read_word(eeAddr+1);
 }
 
 //*************************************************************************
 // press Button
 //*************************************************************************
-void pressButton (uint8_t Button_nr)
+void pressButton (uint8_t button)
 {
-    if (buttonDebounce == 0) {
-        if (Button_nr != Button_nr_old) {
-            Button_nr_old = Button_nr;
-            buttonDebounce = 25;
-            buttonFunction(Button_nr);
-        }
+    buttonPressDuration[button]++;
+    if (buttonPressDuration[button] == 500) 
+    {
+        buttonFunction(button);
+    }
+
+    if ((button == BUTTON_UI) && buttonPressDuration[button] == 60000) 
+    {
+        displaySettings();
     }
 }
 
 //*************************************************************************
-// less Button
+// release Button
 //*************************************************************************
-void lessButton (uint8_t Button_nr)
+void releaseButton (uint8_t button)
 {
-    if (Button_nr_old == Button_nr) {
-        if (buttonDebounce == 0) {
-            buttonDebounce = 25;
-            Button_nr = 0;
-            Button_nr_old = 0;
+    if (buttonPressDuration[button] > 0)
+    {
+        buttonReleaseDuration[button]++;
+        if (buttonReleaseDuration[button] > 100)
+        {
+            buttonReleaseDuration[button] = 0;
+            buttonPressDuration[button] = 0;
         }
     }
 }
+
+//            print_value(U_act_cmd, Button_nr*10);
+//            print_value(I_act_cmd, buttonPressDuration[Button_nr]/10);
+//            soft_delay(300);
 
 //*************************************************************************
 // read Button Pin
 //*************************************************************************
-void readButton (void)
+void readButtons(void)
 {
-    uint8_t buttonState = 0;
+    uint16_t pinc = PINC;
     
-    buttonState = PINC & (1<<B_Standby);
-    if (buttonState == 0) {
-         pressButton(1);
-         return;
-    } else lessButton(1);
+    if ((pinc & (1<<B_Standby)) == 0)
+         pressButton(BUTTON_STANDBY);
+    else 
+        releaseButton(BUTTON_STANDBY);
     
-    buttonState = PINC & (1<<B_Left);
-    if (buttonState == 0) {
-        pressButton(2);
-        return;
-    } else lessButton(2);
+    if ((pinc & (1<<B_Left)) == 0)
+        pressButton(BUTTON_LEFT);
+    else 
+        releaseButton(BUTTON_LEFT);
     
-    buttonState = PINC & (1<<B_Right);
-    if (buttonState == 0) {
-        pressButton(3);
-        return;
-    } else lessButton(3);
+    if ((pinc & (1<<B_Right)) == 0)
+        pressButton(BUTTON_RIGHT);
+    else 
+        releaseButton(BUTTON_RIGHT);
     
-    buttonState = PINC & (1<<B_UI);
-    if (buttonState == 0) {
-        pressButton(4);
-        return;
-    } else lessButton(4);
+    if ((pinc & (1<<B_UI)) == 0)
+        pressButton(BUTTON_UI);
+    else 
+        releaseButton(BUTTON_UI);
     
-    buttonState = PIND & (1<<B_Recall);
-    if (buttonState == 0) {
-        pressButton(5);
-        return;
-    } else lessButton(5);
+    if ((PIND & (1<<B_Recall)) == 0)
+        pressButton(BUTTON_RECALL);
+    else
+        releaseButton(BUTTON_RECALL);
+
+    if ((pinc & (1<<B_Memory)) == 0)
+        pressButton(BUTTON_MEMORY);
+    else 
+        releaseButton(BUTTON_MEMORY);
     
-    buttonState = PINC & (1<<B_Memory);
-    if (buttonState == 0) {
-        pressButton(6);
-        return;
-    } else lessButton(6);
+    if ((pinc & (1<<B_Enter)) == 0)
+        pressButton(BUTTON_ENTER);
+    else 
+        releaseButton(BUTTON_ENTER);
+
     
-    buttonState = PINC & (1<<B_Enter);
-    if (buttonState == 0) {
-        pressButton(7);
-        return;
-    } else lessButton(7);
-    
-    // dec Debounce counter
-    if (buttonDebounce >0)
-    {
-        buttonDebounce--;
-    }
+
 }
 
 //*************************************************************************
@@ -1413,21 +1467,18 @@ void UI_control(void)
     status_old = status;
 }
 
+
 //*************************************************************************
 // init LCD
 //*************************************************************************
 void display_fw_version(void)
 {
-    wr_SPI_buffer3(0x23, 0x05, 0x19);			// clr "V"
-    wr_SPI_buffer3(0x27, 0x03, 0x1E);			// clr "A"
-    wr_SPI_buffer3(0x23, 0x03, 0x1E);			// clr "W"
-    wr_SPI_buffer3(0x23, 0x06, 0x1B);		    // clr "." in V-value
-    wr_SPI_buffer3(0x27, 0x01, 0x19);		    // clr "." in A value
-    wr_SPI_buffer3(0x24, 0x06, 0x15);		    // clr "_" in V value
-
+    send_LCD_commands(clr_Digit_Lines);
+    send_LCD_commands(clr_unit_display);
+    send_LCD_commands(clr_all_digits);
+    wr_SPI_buffer3(0x23,0x06,0x34);     // decimal point U
     print_value(U_act_cmd, VERSION*10);
     print_value(I_act_cmd, BUILD);
-    wr_SPI_buffer5(P_act_cmd, 0x5d, 0x5d, 0x5d, 0x5d); // No Power display
 }
 
 //*************************************************************************
@@ -1435,19 +1486,24 @@ void display_fw_version(void)
 //*************************************************************************
 void init_LCD (void)
 {
+    uint8_t contrast, backlit;
     soft_delay(1000);
     SPI_wr2(Clear_Screen_cmd);
-    soft_delay(100);
-    SPI_wr2(Backlit_on_cmd);
+    read_eeprom_display_settings(&contrast, &backlit);
+    SPI_wr2(backlit ? Backlit_on_cmd : Backlit_off_cmd);
+    SPI_wr2(LCD_Contrast_cmd+contrast);
     soft_delay(100);
     SPI_wr2(Relais_Off_24V);
     SPI_wr2(Standby_On_cmd);
+
     send_LCD_commands(LCD_inits);
     
     display_fw_version();
     soft_delay(3000);
 
     send_LCD_commands(Standby_on);
+    setDigitPos();
+
     Standby_flag = 1;
 }
 
@@ -1456,15 +1512,17 @@ void init_LCD (void)
 //*************************************************************************
 void init_UIlimits (void)
 {
-    UI_flag = 0;						// print Ulimit
-    read_Ulimit();
+    UI_flag = UI_FLAG_U;
+    
+    Ulimit = read_eeprom_ulimit();
     print_value(U_limit_cmd, Ulimit);
-    UI_flag = 1;						// print Ilimit
-    read_Ilimit();
-    set_UI_Limits();
-    set_Isoll(Ilimit);
+    
+    Ilimit = read_eeprom_ilimit();
     print_value(I_limit_cmd, Ilimit);
-    UI_flag = 0;
+
+    set_UI_Limits();
+    set_Usoll(Ulimit);
+    set_Isoll(Ilimit);
 }
 
 int16_t calibration_user(uint16_t is_U)
@@ -1594,17 +1652,68 @@ void startup_calibration(void)
     }
 
     send_LCD_commands(Standby_on);
-    
-    wr_SPI_buffer3(0x27, 0x02, 0x15);           // clr "_"
-    wr_SPI_buffer3(0x23, 0x05, 0x34);			// set "V"
-    wr_SPI_buffer3(0x27, 0x03, 0x31);			// set "A"
-    wr_SPI_buffer3(0x23, 0x03, 0x31);			// set "W"
-    wr_SPI_buffer3(0x23, 0x06, 0x34);	        // set "." in V-value
-    wr_SPI_buffer3(0x27, 0x01, 0x34);		    // set "." in A value
-    wr_SPI_buffer3(0x24, 0x06, 0x38);		    // set "_" in V value
-
+    send_LCD_commands(clr_Digit_Lines);
+    send_LCD_commands(restore_unit_display);
+        
     return;
 }
+
+void printContrast(uint8_t contrast)
+{
+    wr_SPI_buffer5(I_act_cmd, 0x50+contrast+1, 0x5D, 0x50, 0x5C);
+}
+
+void displaySettings(void)
+{
+    uint8_t contrast;
+    uint8_t backlit;
+     
+    send_LCD_commands(clr_unit_display);
+    send_LCD_commands(clr_Digit_Lines);
+    send_LCD_commands(clr_all_digits);
+    wr_SPI_buffer3(0x27,0x02,0x38);                                 // "_"
+    printContrast(contrast);
+
+    read_eeprom_display_settings(&contrast, &backlit);
+    printContrast(contrast);
+    
+    do
+    {
+        pull_encoder();
+        int diff = encode_read4();
+        
+        if (diff> 0 && contrast < 7)
+        {
+            contrast++;
+            SPI_wr2(LCD_Contrast_cmd + contrast);
+            printContrast(contrast);
+        }
+        else if (diff<0 && contrast>0)
+        {
+            contrast--;
+            SPI_wr2(LCD_Contrast_cmd + contrast);
+            printContrast(contrast);
+        }
+
+        if ((PINC & (1<<B_Right)) == 0)
+        {
+            SPI_wr2(Backlit_on_cmd);
+            backlit = 1;
+        }        
+        if ((PINC & (1<<B_Left)) == 0)
+        {
+            SPI_wr2(Backlit_off_cmd);
+            backlit = 0;
+        }
+    } while ((PINC & (1<<B_Enter)) != 0);
+    
+    save_eeprom_display_settings(contrast, backlit);
+
+    send_LCD_commands(restore_unit_display);
+    send_LCD_commands(clr_Digit_Lines);
+    setDigitPos();
+    
+}    
 
 //*************************************************************************
 // Main
@@ -1630,7 +1739,7 @@ int main(void)
         save_print_UIlimit();
         UI_control();
         pull_encoder();
-        readButton();
+        readButtons();
         flash_PrgNo();	
     }	
 }

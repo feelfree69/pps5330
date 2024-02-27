@@ -3,12 +3,16 @@
 The PPS5330 Power supply is controlled by an ATMEGA88PA microcontroller.
 The firmware has been developed from scratch by Rolf D., see this thread in the german forum: https://www.mikrocontroller.net/topic/499101
 
-WARNING!
+## WARNING!
 ```
-If you decide to flash this firmware to your PPS5330, you'll lose the original firmware, and you won't get it back, unless you pay ELV for reprogramming the ATMEGA88.
+If you decide to flash this firmware to your PPS5330, you'll lose the original firmware, 
+and you won't get it back, unless you pay ELV for reprogramming the ATMEGA88.
 (ELV's firmware is closed source). 
 ```
 YOU HAVE BEEN WARNED!
+
+
+## STATUS
 
 WORKING:
 - All Basic functionality is working, the Power Supply is in a usable state 
@@ -25,13 +29,22 @@ NICE TO HAVE:
 - Menu with LCD contrast/backlit settings
 - Temperature compensation (if needed)
 
-History:
+## HISTORY
+
+ - 199b4
+    - add menu for display-settings (long press U/I), encoder/arrows for changing, enter for exit
+    - recall-button: blinky display of stored values before applying
+    - remove more magic numbers in code
+    - rework button handling (still room for improvement...)
+
  - 199b3  
     - added T2 (transformer) measurement
     - toggle T1/T2 at 2-digit memory section
     - decrease interval for temperature measurements
+
  - 199b2  
     - Added Current calibration
+
  - 199b1  
     - Minor code cleanups (or mess-up's, dependend on your view..)
     - Display firmware version at startup
