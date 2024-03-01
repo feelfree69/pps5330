@@ -31,6 +31,9 @@ NICE TO HAVE:
 
 ## HISTORY
 
+ - 199b5
+    - code cleanup, cosmetics
+
  - 199b4
     - add menu for display-settings (long press U/I), encoder/arrows for changing, enter for exit
     - recall-button: blinky display of stored values before applying
@@ -49,5 +52,6 @@ NICE TO HAVE:
     - Minor code cleanups (or mess-up's, dependend on your view..)
     - Display firmware version at startup
     - Added Voltage calibration
+
 - V1.50a Original version, see link above
  

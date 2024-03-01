@@ -60,27 +60,10 @@
 
 #define NOP() asm volatile ("nop" ::) 
 
-#define U_act_cmd         0x43
-#define I_act_cmd         0x47
-#define P_act_cmd         0x4B
-#define U_limit_cmd       0x63
-#define I_limit_cmd       0x67
-#define Memory_nr_cmd     0x6B
-#define Standby_Off_cmd   0xA0
-#define Standby_On_cmd    0xA1
-#define Relais_Off_24V    0xB0
-#define Relais_On_48V     0xB1
-#define Backlit_off_cmd   0xC0
-#define Backlit_on_cmd    0xC1
-#define LCD_Contrast_cmd  0xD8
-#define LCD_Firmware_cmd  0xE0
-#define Clear_Screen_cmd  0xF0
-#define All_on_Screen_cmd 0xF1
-
 #define MEAS_TYPE_U 0
 #define MEAS_TYPE_I 1
-#define MEAS_TYPE_T1 2
-#define MEAS_TYPE_T2 3
+#define MEAS_TYPE_T_TRANSFORMER 2
+#define MEAS_TYPE_T_HEATSINK 3
 
 #define UI_FLAG_U 0
 #define UI_FLAG_I 1
@@ -93,6 +76,12 @@
 #define BUTTON_MEMORY   5
 #define BUTTON_ENTER    6
 #define BUTTON_COUNT    7
+
+#define MEAS_PHASE_CLEAR_INTEGRATOR    0
+#define MEAS_PHASE_LOAD_INTEGRATOR     1
+#define MEAS_PHASE_MEASURE_INTEGRATOR  2
+#define MEAS_PHASE_READ_RESULT         3
+
 
 // prototypes -------------------------------------------------------------
 void soft_delay (uint16_t time_value);
@@ -111,8 +100,8 @@ void init_Timer2(void);
 void start_Measurement_timer(void);
 void print_U_result(uint16_t meas_time);
 void print_I_result(uint16_t meas_time);
-void print_T1_result(uint16_t meas_time);
-void print_T2_result(uint16_t meas_time);
+void print_T_transformer_result(uint16_t meas_time);
+void print_T_heatsink_result(uint16_t meas_time);
 void init_Encoder(void);
 void pull_encoder(void);
 int8_t encode_read4(void);
@@ -169,10 +158,6 @@ uint8_t flash_time = 5;
 uint8_t blinki_flag = 0;
 int16_t U_meas = 0;
 int16_t I_meas = 0;
-#ifdef CONFIG_TEMP_DISPLAY_AT_POWER
-uint8_t blinki_flag1 = 0;
-uint8_t flash_time1 = 0;
-#endif
 uint32_t buttonPressDuration[BUTTON_COUNT];
 uint32_t buttonReleaseDuration[BUTTON_COUNT];
 
@@ -181,51 +166,113 @@ uint16_t calib_counts_offset_0V  = CALIB_COUNTS_OFFSET_0V_DEFAULT;
 uint16_t calib_counts_per_1200mA = CALIB_COUNTS_PER_1200MA_DEFAULT;
 uint16_t calib_counts_offset_0mA = CALIB_COUNTS_OFFSET_0MA_DEFAULT;
 
-#define clr_U_underlines 0x24,0x07,0x1D, 0x24,0x06,0x15, 0x24,0x06,0x1D, 0x24,0x05,0x15
-#define clr_I_underlines 0x27,0x01,0x1D, 0x27,0x01,0x15, 0x27,0x02,0x1D, 0x27,0x02,0x15
+// LCD commands
+
+#define U_act_cmd         0x43
+#define I_act_cmd         0x47
+#define P_act_cmd         0x4B
+#define U_limit_cmd       0x63
+#define I_limit_cmd       0x67
+#define Memory_nr_cmd     0x6B
+#define Standby_Off_cmd   0xA0
+#define Standby_On_cmd    0xA1
+#define Relais_Off_24V    0xB0
+#define Relais_On_48V     0xB1
+#define Backlit_off_cmd   0xC0
+#define Backlit_on_cmd    0xC1
+#define LCD_Contrast_cmd  0xD8
+#define LCD_Firmware_cmd  0xE0
+#define Clear_Screen_cmd  0xF0
+#define All_on_Screen_cmd 0xF1
 
 #define set_U1_underline 0x24,0x07,0x32
 #define set_U2_underline 0x24,0x06,0x38
 #define set_U3_underline 0x24,0x06,0x32
 #define set_U4_underline 0x24,0x05,0x38
 
+#define clr_U_underlines 0x24,0x07,0x1D, 0x24,0x06,0x15, 0x24,0x06,0x1D, 0x24,0x05,0x15
+
 #define set_I1_underline 0x27,0x01,0x32
 #define set_I2_underline 0x27,0x01,0x38
 #define set_I3_underline 0x27,0x02,0x32
 #define set_I4_underline 0x27,0x02,0x38
 
+#define clr_I_underlines 0x27,0x01,0x1D, 0x27,0x01,0x15, 0x27,0x02,0x1D, 0x27,0x02,0x15
+
+#define set_V_symbol 0x23,0x05,0x34
+#define clr_V_symbol 0x23,0x05,0x19
+#define set_A_symbol 0x27,0x03,0x31
+#define clr_A_symbol 0x27,0x03,0x1E
+#define set_W_symbol 0x23,0x03,0x31
+#define clr_W_symbol 0x23,0x03,0x1E
+
+#define set_V_point 0x23,0x06,0x34
+#define clr_V_point 0x23,0x06,0x1B
+#define set_A_point 0x27,0x01,0x34
+#define clr_A_point 0x27,0x01,0x19
+#define set_W_point 0x23,0x02,0x31
+#define clr_W_point 0x23,0x02,0x1E
+
+#define set_U_limit 0x04,0x20,0x38
+#define set_I_limit 0x23,0x05,0x31
+
+#define set_V_Ulimit 0x04,0x21,0x38
+#define set_A_Ilimit 0x27,0x05,0x31
+
+#define set_point_ulimit 0x00,0x23,0x38
+#define set_point_ilimit 0x04,0x27,0x34
+
+#define set_memory 0x27,0x03,0x38
+#define clr_memory 0x27,0x03,0x15
+
+#define set_standby 0x22,0x03,0x31
+#define clr_standby 0x22,0x03,0x1E
+
+#define set_active_V 0x20,0x05,0x32
+#define clr_active_V 0x20,0x05,0x1D
+
+#define set_active_A 0x27,0x03,0x32
+#define clr_active_A 0x27,0x03,0x1D
+
+#define set_overtemp 0x22,0x01,0x34
+#define clr_overtemp 0x22,0x01,0x11
 
 //LCD commands -----------------------------------------------------------
 
 const uint8_t clr_Digit_Lines[] PROGMEM = {24, clr_U_underlines, clr_I_underlines};
     
-const uint8_t Standby_on[]  PROGMEM = {10, Standby_On_cmd, 0x22,0x03,0x31, 0x20,0x05,0x1D, 0x27,0x03,0x1D};
-const uint8_t Standby_off[] PROGMEM = {4, Standby_Off_cmd, 0x22,0x03,0x1E};
+const uint8_t Standby_on[]  PROGMEM = {10, Standby_On_cmd, set_standby, 0x20,0x05,0x1D, 0x27,0x03,0x1D};
+const uint8_t Standby_off[] PROGMEM = {4, Standby_Off_cmd, clr_standby};
     
-const uint8_t Degree_Symbol[] PROGMEM = {12, 0x23,0x02,0x31, 0x30,0x17,0x20, 0x30,0x26,0x38, 0x30,0x24,0x17};
-    
-const uint8_t Activ_V[] PROGMEM = {6, 0x20,0x05,0x32, 0x27,0x03,0x1D};
-const uint8_t Activ_A[] PROGMEM = {6, 0x27,0x03,0x32, 0x20,0x05,0x1D};
-    
-const uint8_t clr_Memory[] PROGMEM = {8, 0x27,0x03,0x15, Memory_nr_cmd,0x5D,0x5D,0x5D,0x5D};
-    
-const uint8_t LCD_inits[] PROGMEM = {60, 0x23,0x05,0x34, 0x23,0x06,0x34, 0x27,0x03,0x31, 0x27,0x01,0x34,
-                                         0x23,0x02,0x31, 0x30,0x17,0x20, 0x30,0x26,0x38, 0x30,0x24,0x17,
-                                         0x00,0x23,0x38, 0x04,0x20,0x38, 0x04,0x21,0x38, 0x04,0x27,0x34,
-                                         0x23,0x05,0x31, 0x27,0x05,0x31, set_U2_underline,
+//const uint8_t Degree_Symbol[] PROGMEM = {12, 0x23,0x02,0x31, 0x30,0x17,0x20, 0x30,0x26,0x38, 0x30,0x24,0x17};
+ 
+const uint8_t Activ_V[] PROGMEM = {6, set_active_V, clr_active_A};
+const uint8_t Activ_A[] PROGMEM = {6, set_active_A, clr_active_V};
+
+const uint8_t clr_Memory[] PROGMEM = {8, clr_memory, Memory_nr_cmd,0x5D,0x5D,0x5D,0x5D};
+
+//const uint8_t LCD_inits[] PROGMEM = {60, set_V_symbol,   set_V_point,    set_A_symbol,   set_A_point,
+//                                         0x00,0x23,0x38, set_U_limit,    set_V_Ulimit,   0x04,0x27,0x34,
+//                                         set_I_limit,    set_V_Ulimit,   set_U2_underline,
+
+
+const uint8_t LCD_inits[] PROGMEM = {54, set_V_symbol, set_V_point,
+                                         set_A_symbol, set_A_point,
+                                         set_W_symbol, set_W_point,
+                                         set_point_ulimit,
+                                         set_U_limit, set_V_Ulimit, set_point_ilimit,
+                                         set_I_limit, set_A_Ilimit, 
+                                         set_U2_underline,    
                                          U_act_cmd,0x5D,0x50,0x50,0x50,  
                                          I_act_cmd,0x50,0x50,0x50,0x50, 
-                                         P_act_cmd,0x50,0x50,0x50,0x50};      
+                                         P_act_cmd,0x50,0x50,0x50,0x50};
 
-const uint8_t restore_unit_display[] PROGMEM = {15, 0x23,0x05,0x34, 0x27,0x03,0x31, 0x23,0x03,0x31,
-                                                    0x23,0x06,0x34, 0x27,0x01,0x34 };
+const uint8_t restore_unit_display[] PROGMEM = {15, set_V_symbol, set_A_symbol, set_W_symbol, set_V_point, set_A_point, set_W_point };
+const uint8_t clr_unit_display[]     PROGMEM = {15, clr_V_symbol, clr_A_symbol, clr_W_symbol, clr_V_point, clr_A_point, clr_W_point };
 
-const uint8_t clr_unit_display[] PROGMEM = {15, 0x23,0x05,0x19, 0x27,0x03,0x1E, 0x23,0x03,0x1E,
-                                                0x23,0x06,0x1B, 0x27,0x01,0x19 };
-const uint8_t clr_all_digits[] PROGMEM = { 15, U_act_cmd,0x5D, 0x5D, 0x5D, 0x5D, 
-                                               I_act_cmd,0x5D, 0x5D, 0x5D, 0x5D, 
+const uint8_t clr_all_digits[] PROGMEM = { 15, U_act_cmd,0x5D, 0x5D, 0x5D, 0x5D,
+                                               I_act_cmd,0x5D, 0x5D, 0x5D, 0x5D,
                                                P_act_cmd,0x5D, 0x5D, 0x5D, 0x5D };
-
 
 //*************************************************************************
 // soft delay
@@ -418,9 +465,6 @@ void print_degree(uint16_t value) // 9700
 {
     value /= 100;                 // 97
     wr_SPI_buffer5(Memory_nr_cmd, 0x5D, 0x5D,(value%10)+0x50, (value/10)+0x50);
-
-    //send_LCD_commands(Degree_Symbol);
-    //wr_SPI_buffer3(0x23,0x03,0x1E);		// clr "W"
 }
 
 //-------------------------------------------------------------------------
@@ -430,7 +474,7 @@ void init_Interrupt(void)
 {
     PCICR |= (1 << PCIE0);
     PCMSK0 |= (1 << PCINT0);
-    sei();						// enable Global Interrupts 
+    sei();                  // enable Global Interrupts 
 }
 
 //-------------------------------------------------------------------------
@@ -460,7 +504,7 @@ void start_Measurement_timer(void)
     OCR2B = 0;
     TCNT2 = 10;
         
-    if (Meas_phase == 3) {
+    if (Meas_phase == MEAS_PHASE_READ_RESULT) {
         ADW_flag = 1;
     }
     else ADW_flag = 0;
@@ -572,60 +616,37 @@ void print_I_result(uint16_t meas_time)
 }
 
 //*************************************************************************
-// print T1_measurement result (heat sink)
+// print T measurement result (heat sink) and set Fan PWM/Overtemp alarm
 //*************************************************************************
-void print_T1_result(uint16_t meas_time)
+void print_T_heatsink_result(uint16_t meas_time)
 {	
     #define Digital_offset_b 6000  // Calibration to be done
     
     uint16_t result = (((uint32_t)meas_time - Digital_offset_b) * 198902) >> 16;
 
-#ifdef CONFIG_TEMP_DISPLAY_AT_POWER
-    if (Iist > 0 && blinki_flag1 == 0 && flash_time1 > 0)
-    {
-        uint16_t watt = ((uint32_t)Uist * Iist)/10000;
-        wr_SPI_buffer3(0x23,0x03,0x31);                 // print "W"
-        print_value(P_act_cmd, watt);	
-    }
-    else if (Iist > 0 && blinki_flag1 == 1 && flash_time1 > 0){
-        print_degree(result);	
-    }
-    else print_degree(result);
-    
-    if (flash_time1 == 0)
-    {
-        flash_time1 = 30;
-        if (blinki_flag1 == 0)
-        {
-            blinki_flag1 = 1;
-        }
-        else blinki_flag1 = 0;
-    }
-#else
     if (! (Memory_flag || Recall_flag))
     {
         print_degree(result);
     }        
-#endif
-    
-    result = result / 100;
+
+    result /= 100;
         
     // heat alert
     if (result >= 75)
     {
-        wr_SPI_buffer4(0xA1, 0x22, 0x03, 0x31);
+        wr_SPI_buffer4(Standby_On_cmd, set_standby);
         Standby_flag = 1;
         return;
     }
-    else if (result >= 70.0)
+    else if (result >= 70)
     {
-        wr_SPI_buffer3(0x22, 0x01 , 0x34);
+        wr_SPI_buffer3(set_overtemp);
         OCR0A = 255;		// set max Fan PWM
         return;
     }
     else if (result < 69)
     {
-        wr_SPI_buffer3(0x22, 0x01, 0x11);
+        wr_SPI_buffer3(clr_overtemp);
         
         if (result <= 35)
         {
@@ -641,9 +662,9 @@ void print_T1_result(uint16_t meas_time)
 
 
 //*************************************************************************
-// print T2_measurement result (transformer)
+// print T measurement result (transformer)
 //*************************************************************************
-void print_T2_result(uint16_t meas_time)
+void print_T_transformer_result(uint16_t meas_time)
 {	
     #define Digital_offset_b 6000  // Calibration to be done (shared with T1?)
     
@@ -704,11 +725,21 @@ void Measurement(void)
         return;
     }
     
+    #define AD_Input_Mask          ((1<<ADC_AD0) | (1<<ADC_AD1) | (1<<ADC_AD2))
+    #define AD_input_U               0
+    #define AD_input_I              (1<<ADC_AD0)                   
+    #define AD_input_T_Transformer  (1<<ADC_AD1)                   
+    #define AD_input_T_Heatsink     ((1<<ADC_AD0) | (1<<ADC_AD1))   
+    #define AD_input_2V5            (1<<ADC_AD2)                   
+    #define AD_input_Clear         ((1<<ADC_AD0) | (1<<ADC_AD2))   
+
     // clear integrator ----------------- ----------------------------
-    if (Meas_phase == 0)
+    if (Meas_phase == MEAS_PHASE_CLEAR_INTEGRATOR)
     {
+        Meas_phase = MEAS_PHASE_LOAD_INTEGRATOR;
+
         // clear ADC
-        Meas_phase = 1;
+        //PORTD = (PORTD & ~AD_Input_Mask) | AD_input_Clear;
         PORTD |= (1 << ADC_AD0) | (1 << ADC_AD2);
         PORTD &= ~(1<<ADC_AD1);
         start_Measurement_timer();
@@ -716,30 +747,26 @@ void Measurement(void)
     }
         
     // load integrator -----------------------------------------------
-    if (Meas_phase == 1)
+    if (Meas_phase == MEAS_PHASE_LOAD_INTEGRATOR)
     {
-        // clear flags
-        Meas_phase = 2;
+         Meas_phase = MEAS_PHASE_MEASURE_INTEGRATOR;
             
         // set AD input
         if (Meas_type == MEAS_TYPE_U)
         {
-            PORTD &= ~((1 << ADC_AD0) | (1<<ADC_AD1) | (1<<ADC_AD2)); //AD-Input 0
+            PORTD = (PORTD & ~AD_Input_Mask) | AD_input_U;
         }
         if (Meas_type == MEAS_TYPE_I)
         {
-            PORTD &= ~((1 << ADC_AD1) | (1<<ADC_AD2)); 
-            PORTD |= (1 << ADC_AD0);                                  // AD-Input 1
-        }
-        if (Meas_type == MEAS_TYPE_T1)
+            PORTD = (PORTD & ~AD_Input_Mask) | AD_input_I;
+        }   
+        if (Meas_type == MEAS_TYPE_T_TRANSFORMER)
         {
-            PORTD &= ~(1<<ADC_AD2);
-            PORTD |= (1 << ADC_AD0) | (1<<ADC_AD1);                   // AD-Input 3
+            PORTD = (PORTD & ~AD_Input_Mask) | AD_input_T_Transformer;
         }
-        if (Meas_type == MEAS_TYPE_T2)
+        if (Meas_type == MEAS_TYPE_T_HEATSINK)
         {
-            PORTD &= ~((1<<ADC_AD2) | (1<<ADC_AD0));
-            PORTD |=  (1<<ADC_AD1);                                   // AD-Input 2
+            PORTD = (PORTD & ~AD_Input_Mask) | AD_input_T_Heatsink;
         }
             
         start_Measurement_timer();
@@ -747,22 +774,21 @@ void Measurement(void)
     }
         
     // measurement integrator ----------------------------------------
-    if (Meas_phase == 2)
+    if (Meas_phase == MEAS_PHASE_MEASURE_INTEGRATOR)
     {
-        Meas_phase = 3;
+        Meas_phase = MEAS_PHASE_READ_RESULT;
         // start ADC measurement
-        PORTD |= (1 << ADC_AD2);
-        PORTD &= ~((1 << ADC_AD0) | (1<<ADC_AD1));                  // AD-Input 3, but why????
+        PORTD = (PORTD & ~AD_Input_Mask) | AD_input_2V5;
         start_Measurement_timer();
         return;
     }
         
     // print measurement result ---------------------------------------
-    if (Meas_phase == 3)
+    if (Meas_phase == 3 /*MEAS_PHASE_READ_RESULT*/)
     {
         // read timer value for measurements
         uint16_t meas_time = ((OCR2B << 8) | TCNT2);
-            
+
         ADW_flag = 0;
             
         if (Meas_type == MEAS_TYPE_U)
@@ -781,25 +807,25 @@ void Measurement(void)
             }
         }
             
-        if (Meas_type == MEAS_TYPE_T1)
+        if (Meas_type == MEAS_TYPE_T_TRANSFORMER)
         {
-            print_T1_result(meas_time);
+            print_T_transformer_result(meas_time);
         }
 
-        if (Meas_type == MEAS_TYPE_T2)
+        if (Meas_type == MEAS_TYPE_T_HEATSINK)
         {
-            print_T2_result(meas_time);
+            print_T_heatsink_result(meas_time);
         }
 
         // Get next measurement type; it doesn't make sense to read temperatures that often
         counter++;
         if (counter%50 == 0)
         {
-            Meas_type = MEAS_TYPE_T1;
+            Meas_type = MEAS_TYPE_T_TRANSFORMER;
         } 
         else if (counter%25 == 0)
         {
-            Meas_type = MEAS_TYPE_T2;
+            Meas_type = MEAS_TYPE_T_HEATSINK;
         }
         else if (counter%2 == 0)            
         {
@@ -811,7 +837,7 @@ void Measurement(void)
         }                        
             
         // clear flags
-        Meas_phase = 0;
+        Meas_phase = MEAS_PHASE_CLEAR_INTEGRATOR;
         Timer2_run_flag = 0;
             
         // set UI-Limits
@@ -819,11 +845,6 @@ void Measurement(void)
             
         if (Hold_time > 0)  Hold_time--;
         if (flash_time > 0) flash_time--;
-            
-        //if (flash_time1 > 0)
-        //{
-        //  flash_time1--;
-        //}
     }
 }
 
@@ -1181,7 +1202,7 @@ void buttonFunction (uint8_t button)
         {
             if (Recall_flag == FALSE)
             {
-                wr_SPI_buffer3(0x27, 0x03, 0x38);	// print "Memory"
+                wr_SPI_buffer3(set_memory);
                 print_memory_nr(Memory_nr);
                 Recall_flag = TRUE;
                 flash_time = 5;                     // flash-time for PrgNo
@@ -1201,7 +1222,7 @@ void buttonFunction (uint8_t button)
         {
             if (Memory_flag == FALSE)
             {
-                wr_SPI_buffer3(0x27, 0x03, 0x38);	// print "Memory"
+                wr_SPI_buffer3(set_memory);
                 print_memory_nr(Memory_nr);
                 Memory_flag = TRUE;
                 flash_time = 5;                     // flash-time for PrgNo
@@ -1410,7 +1431,7 @@ void display_fw_version(void)
     send_LCD_commands(clr_Digit_Lines);
     send_LCD_commands(clr_unit_display);
     send_LCD_commands(clr_all_digits);
-    wr_SPI_buffer3(0x23,0x06,0x34);     // decimal point U
+    wr_SPI_buffer3(set_V_point);
     print_value(U_act_cmd, VERSION*10);
     print_value(I_act_cmd, BUILD);
 }
@@ -1482,9 +1503,9 @@ void wait_for_standby_off(void)
 {
     do 
     {
-        wr_SPI_buffer3(0x22,0x03,0x31);
+        wr_SPI_buffer3(set_standby);
         soft_delay(200);
-        wr_SPI_buffer3(0x22,0x03,0x1E);
+        wr_SPI_buffer3(clr_standby);
         soft_delay(200);
     } while ((PINC & (1<<B_Standby)) != 0);
     send_LCD_commands(Standby_off);
@@ -1507,6 +1528,10 @@ void startup_calibration(void)
         const uint16_t i_ref_low = 300;     // use a 12V/5W car bulb as load
         const uint16_t i_ref_high = 1500;   // use a 12V/21W car bulb as load
         
+        SPI_wr2(Clear_Screen_cmd);
+        wr_SPI_buffer3(set_V_Ulimit);
+        wr_SPI_buffer3(set_A_Ilimit);
+        
         // Limit current to 100mA; calibration should be done in idle anyway
         set_Isoll(100);
         print_value(I_limit_cmd, 100);
@@ -1515,22 +1540,22 @@ void startup_calibration(void)
         uint16_t i_refs[] = { i_ref_low, i_ref_high };
         uint16_t ocrs[] = { 0, 0 };
 
-        wr_SPI_buffer5(P_act_cmd, 0x5D, 0x5D, 0x5D, 0x5D); // Clr P display
+        //wr_SPI_buffer5(P_act_cmd, 0x5D, 0x5D, 0x5D, 0x5D); // Clr P display
             
         // Voltage calibration
         for (uint8_t i=0; i<2; i++)
         {
             send_LCD_commands(Standby_on);
-            wr_SPI_buffer5(I_act_cmd, 0x5D, 0x5D, 0x5D, 0x5D);      // Clr I display
+            wr_SPI_buffer3(set_V_symbol);
 
             set_Usoll(u_refs[i]);
             wr_SPI_buffer5(U_act_cmd, 0x51+i, 0x5B, 0x5A ,0x5C);    // "CAL1/2"
-            wr_SPI_buffer3(0x23, 0x05, 0x34);                       //add "V"
             print_value(U_limit_cmd, u_refs[i]);
+            wr_SPI_buffer5(I_act_cmd, 0x5D, 0x5D, 0x5D, 0x5D);      // Clr I display
 
             wait_for_standby_off();
             send_LCD_commands(Activ_V);
-            wr_SPI_buffer3(0x27, 0x02, 0x38);                       // "_"
+            wr_SPI_buffer3(set_I4_underline);
 
             soft_delay(200);
             ocrs[i] = calibration_user(1);
@@ -1552,13 +1577,13 @@ void startup_calibration(void)
         for (uint8_t i=0; i<2; i++)
         {
             send_LCD_commands(Standby_on);
-            wr_SPI_buffer5(I_act_cmd, 0x5D, 0x5D, 0x5D, 0x5D);      // Clr I display
-            wr_SPI_buffer3(0x23, 0x05, 0x19);                       // remove "V"
-            wr_SPI_buffer3(0x27, 0x03, 0x31);                       // add "A"
+            wr_SPI_buffer3(clr_V_symbol);
+            wr_SPI_buffer3(set_A_symbol);
 
             set_Isoll(i_refs[i]);
             wr_SPI_buffer5(U_act_cmd, 0x53+i, 0x5B, 0x5A ,0x5C);    // "CAL3/4"
             print_value(I_limit_cmd, i_refs[i]);
+            wr_SPI_buffer5(I_act_cmd, 0x5D, 0x5D, 0x5D, 0x5D);      // Clr I display
 
             wait_for_standby_off();
             send_LCD_commands(Activ_A);
@@ -1578,11 +1603,10 @@ void startup_calibration(void)
         save_calibration_data();
 
     }
-
+    
+    send_LCD_commands(LCD_inits);
     send_LCD_commands(Standby_on);
-    send_LCD_commands(clr_Digit_Lines);
-    send_LCD_commands(restore_unit_display);
-        
+
     return;
 }
 
@@ -1599,7 +1623,7 @@ void displaySettings(void)
     send_LCD_commands(clr_unit_display);
     send_LCD_commands(clr_Digit_Lines);
     send_LCD_commands(clr_all_digits);
-    wr_SPI_buffer3(0x27,0x02,0x38);     // "_"
+    wr_SPI_buffer3(set_I4_underline);
     printContrast(contrast);
 
     read_eeprom_display_settings(&contrast, &backlit);
