@@ -22,14 +22,19 @@ WORKING:
 - Current Calibration
 - Measure transformer temperature
 - Menu with LCD contrast/backlit settings (TODO: currently this is blocking normal program flow)
-
-TO DO:
 - Calibration of internal ADC measurements
 
 NICE TO HAVE:
+- Calibration of temperature sensor
 - Temperature compensation (if needed)
 
+IDEAS with hardware modifications:
+- serial remote control (needs re-wiring of button input pins)
+
 ## HISTORY
+ 
+ - 199b6
+    - added calibration of internal ADC measurements for U and I
 
  - 199b5
     - code cleanup, cosmetics

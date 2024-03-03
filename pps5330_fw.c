@@ -19,28 +19,33 @@
 // defines ---------------------------------------------------------------
 
 #define VERSION 199
-#define BUILD   005
+#define BUILD   006
 
-#define CALIB_COUNTS_PER_20V_DEFAULT 10022
-#define CALIB_COUNTS_OFFSET_0V_DEFAULT 123
-#define CALIB_COUNTS_PER_1200MA_DEFAULT 5758
-#define CALIB_COUNTS_OFFSET_0MA_DEFAULT 118
+#define CALIB_COUNTS_PER_20V_DEFAULT           10022
+#define CALIB_COUNTS_OFFSET_0V_DEFAULT           123
+#define CALIB_COUNTS_PER_1200MA_DEFAULT         5758
+#define CALIB_COUNTS_OFFSET_0MA_DEFAULT          118
+
+#define CALIB_COUNTS_MEAS_PER_20V_DEFAULT       6905
+#define CALIB_COUNTS_MEAS_0V_OFFSET_DEFAULT      163
+#define CALIB_COUNTS_MEAS_PER_1200MA_DEFAULT    4992
+#define CALIB_COUNTS_MEAS_0MA_OFFSET_DEFAULT     267
 
 #define CALIB_MAGIC_WORD   0x0ca1
 #define DISPLAY_MAGIC_WORD 0xcc00
 
 #define F_CPU 8000000UL
-#define ADC_AD0		PD4  
-#define ADC_AD1		PD5	 
-#define ADC_AD2		PD7	 
-#define ADC_ADW		PB0	
+#define ADC_AD0     PD4  
+#define ADC_AD1     PD5	 
+#define ADC_AD2     PD7	 
+#define ADC_ADW     PB0	
 #define FAN         PD6 
-#define B_Standby	PC3	 
-#define B_UI		PC1
+#define B_Standby   PC3	 
+#define B_UI        PC1
 #define B_Left      PC0
 #define B_Right     PC2
 #define B_Recall    PD1
-#define B_Enter		PC4
+#define B_Enter     PC4
 #define B_Memory    PC5
 #define Regulator   PD0
 #define Enc_A       PD3
@@ -51,8 +56,6 @@
 #define TRUE 	1
 #define FALSE 	0
 
-#define Vref 2.50
-
 #define SPI_MOSI    3     // PC5 = SPI MOSI
 #define SPI_MISO    4     // PC6 = SPI MISO
 #define SPI_SCK     5     // PC7 = SPI SCK
@@ -60,10 +63,24 @@
 
 #define NOP() asm volatile ("nop" ::) 
 
-#define MEAS_TYPE_U 0
-#define MEAS_TYPE_I 1
+#define AD_Input_Mask          ((1<<ADC_AD0) | (1<<ADC_AD1) | (1<<ADC_AD2))
+#define AD_input_U               0                                          /* Input 0 */
+#define AD_input_I              (1<<ADC_AD0)                                /* Input 1 */
+#define AD_input_T_Transformer  (1<<ADC_AD1)                                /* Input 2 */
+#define AD_input_T_Heatsink    ((1<<ADC_AD0) | (1<<ADC_AD1))                /* Input 3 */
+#define AD_input_Minus_2V5      (1<<ADC_AD2)                                /* Input 4 */
+#define AD_input_Clear         ((1<<ADC_AD0) | (1<<ADC_AD2))                /* Input 5 */
+#define AD_input_None          ((1<<ADC_AD0) | (1<<ADC_AD1) | (1<<ADC_AD2)) /* Input 7 */
+
+#define MEAS_TYPE_U             0
+#define MEAS_TYPE_I             1
 #define MEAS_TYPE_T_TRANSFORMER 2
-#define MEAS_TYPE_T_HEATSINK 3
+#define MEAS_TYPE_T_HEATSINK    3
+
+#define MEAS_PHASE_CLEAR_INTEGRATOR    0
+#define MEAS_PHASE_LOAD_INTEGRATOR     1
+#define MEAS_PHASE_MEASURE_INTEGRATOR  2
+#define MEAS_PHASE_READ_RESULT         3
 
 #define UI_FLAG_U 0
 #define UI_FLAG_I 1
@@ -77,10 +94,6 @@
 #define BUTTON_ENTER    6
 #define BUTTON_COUNT    7
 
-#define MEAS_PHASE_CLEAR_INTEGRATOR    0
-#define MEAS_PHASE_LOAD_INTEGRATOR     1
-#define MEAS_PHASE_MEASURE_INTEGRATOR  2
-#define MEAS_PHASE_READ_RESULT         3
 
 
 // prototypes -------------------------------------------------------------
@@ -97,6 +110,7 @@ void init_Interrupt(void);
 void init_Timer0(void);
 void init_Timer1(void);
 void init_Timer2(void);
+uint16_t singleMeasurement(uint8_t uiflag);
 void start_Measurement_timer(void);
 void print_U_result(uint16_t meas_time);
 void print_I_result(uint16_t meas_time);
@@ -137,11 +151,10 @@ int8_t enc_delta = 0;          // -128 ... 127
 int8_t enc_last;
 uint8_t enc_changed = FALSE;
 volatile uint8_t timer_max = 0;
-volatile uint8_t counter_h = 0;
 volatile uint8_t ADW_flag = 0;
 uint8_t Meas_phase = 0;
 uint8_t Meas_type = MEAS_TYPE_U;
-volatile uint8_t Timer2_run_flag = 0;
+volatile uint8_t Timer2_running = FALSE;
 uint8_t Standby_flag = 0;
 int16_t Ulimit = 0;
 int16_t Ilimit = 0;
@@ -165,6 +178,11 @@ uint16_t calib_counts_per_20V    = CALIB_COUNTS_PER_20V_DEFAULT;
 uint16_t calib_counts_offset_0V  = CALIB_COUNTS_OFFSET_0V_DEFAULT;
 uint16_t calib_counts_per_1200mA = CALIB_COUNTS_PER_1200MA_DEFAULT;
 uint16_t calib_counts_offset_0mA = CALIB_COUNTS_OFFSET_0MA_DEFAULT;
+
+uint16_t meas_counts_per_20V     = CALIB_COUNTS_MEAS_PER_20V_DEFAULT;
+uint16_t meas_counts_offset_0V   = CALIB_COUNTS_MEAS_0V_OFFSET_DEFAULT;
+uint16_t meas_counts_per_1200mA  = CALIB_COUNTS_MEAS_PER_1200MA_DEFAULT;
+uint16_t meas_counts_offset_0mA  = CALIB_COUNTS_MEAS_0MA_OFFSET_DEFAULT;
 
 // LCD commands
 
@@ -521,21 +539,22 @@ void start_Measurement_timer(void)
     // start Timer 2
     TCCR2B |= (1<<CS00)| (1<<CS01);
     
-    Timer2_run_flag = TRUE;  
+    Timer2_running = TRUE;  
 }
 
 //*************************************************************************
 // Timer2 Overflow interrupt for measurement results
 //*************************************************************************
-ISR (TIMER2_OVF_vect)
+ISR(TIMER2_OVF_vect)
 {   
     OCR2B++;
   
     if (OCR2B == 48 && ADW_flag == 0)
     {
-        TCCR2B &= ~((1<<CS00) | (1<<CS01));	// stop timer and disable ADC
-        PORTD |= ((1 << ADC_AD0) | (1<<ADC_AD1) | (1<<ADC_AD2));
-        Timer2_run_flag = 0;
+        TCCR2B &= ~((1<<CS00) | (1<<CS01)); // stop timer
+        Timer2_running = FALSE;
+
+        PORTD |= AD_input_None;
    }
 }
 
@@ -547,9 +566,10 @@ ISR(PCINT0_vect)
     // falling edge
     if (!(PINB & (1<<PB0)))
     {
-        TCCR2B &= ~((1<<CS00) | (1<<CS01));	// stop timer and disable ADC
-        PORTD |= ((1 << ADC_AD0) | (1<<ADC_AD1) | (1<<ADC_AD2));
-        Timer2_run_flag = 0;
+        TCCR2B &= ~((1<<CS00) | (1<<CS01)); // stop timer
+        Timer2_running = FALSE;
+
+        PORTD |= AD_input_None;
     }
 }
 
@@ -563,34 +583,15 @@ void print_P_calculation(void)
 //*************************************************************************
 void print_U_result(uint16_t meas_time)
 {
-    #define Digital_offset_v 163
-    
-    if (Standby_flag == 1 || meas_time <= Digital_offset_v)
+    if (Standby_flag == 1 || meas_time <= meas_counts_offset_0V)
     {
         print_value(U_act_cmd, 0);
         print_value(P_act_cmd, 0);
+        U_meas = 0;
         return;
     }
-    
-    U_meas = (((int32_t)meas_time - Digital_offset_v) * 189774) >> 16;
 
-#if 0    
-    if (Ulimit > 0)
-    {
-        // automatic voltage regulation --------------------------------------
-        if (result != Ulimit){
-            if (result > (Ulimit + 5)){
-                count_v--;
-                set_Usoll(Ulimit + count_v);
-            }
-            else if (result < (Ulimit+1)){
-                count_v ++;
-                set_Usoll(Ulimit + count_v);
-            }
-        }
-    }
-#endif
-    
+    U_meas = ( (int32_t) ( (int32_t)meas_time - meas_counts_offset_0V) * 20000 + meas_counts_per_20V/2)  / meas_counts_per_20V;
     print_value(U_act_cmd, U_meas);
 
     print_P_calculation();
@@ -603,13 +604,15 @@ void print_I_result(uint16_t meas_time)
 {
     #define Digital_offset_a 260
     
-    if (Standby_flag == 1 || meas_time <= Digital_offset_a) 
+    if (Standby_flag == 1 || meas_time <= meas_counts_offset_0mA) 
     {
         print_value(I_act_cmd, 0);
+        print_value(P_act_cmd, 0);
         I_meas = 0;
         return;
     }
-    I_meas = (((uint32_t)meas_time - Digital_offset_a) * 15725) >> 16;
+
+    I_meas = ( (int32_t) ( (int32_t)meas_time - meas_counts_offset_0mA) * 1200 + meas_counts_per_1200mA/2)  / meas_counts_per_1200mA;
     print_value(I_act_cmd, I_meas);
 
     print_P_calculation();
@@ -681,8 +684,7 @@ void print_T_transformer_result(uint16_t meas_time)
 //*************************************************************************
 void init_Encoder(void)
 {
-    int8_t new;
-    new = 0;
+    int8_t new = 0;
     if( PHASE_A ) new = 3;
     if( PHASE_B ) new ^= 1;     // convert gray to binary
     enc_last = new;             // power on state
@@ -692,8 +694,7 @@ void init_Encoder(void)
 // poll Encoder-Port  ----------------------------------------------------
 void pull_encoder(void)
 {
-    int8_t new, diff;
-    new = 0;
+    int8_t new = 0, diff;
     if( PHASE_A ) new = 3;
     if( PHASE_B ) new ^= 1;             // convert gray to binary
     diff = enc_last - new;              // difference last - new
@@ -720,28 +721,18 @@ void Measurement(void)
     static uint8_t counter = 0;
     
     // Abort when a measuring phase is running -----------------------
-    if (Timer2_run_flag == 1)
+    if (Timer2_running)
     {
         return;
     }
     
-    #define AD_Input_Mask          ((1<<ADC_AD0) | (1<<ADC_AD1) | (1<<ADC_AD2))
-    #define AD_input_U               0
-    #define AD_input_I              (1<<ADC_AD0)                   
-    #define AD_input_T_Transformer  (1<<ADC_AD1)                   
-    #define AD_input_T_Heatsink     ((1<<ADC_AD0) | (1<<ADC_AD1))   
-    #define AD_input_2V5            (1<<ADC_AD2)                   
-    #define AD_input_Clear         ((1<<ADC_AD0) | (1<<ADC_AD2))   
-
     // clear integrator ----------------- ----------------------------
     if (Meas_phase == MEAS_PHASE_CLEAR_INTEGRATOR)
     {
         Meas_phase = MEAS_PHASE_LOAD_INTEGRATOR;
 
         // clear ADC
-        //PORTD = (PORTD & ~AD_Input_Mask) | AD_input_Clear;
-        PORTD |= (1 << ADC_AD0) | (1 << ADC_AD2);
-        PORTD &= ~(1<<ADC_AD1);
+        PORTD = (PORTD & ~AD_Input_Mask) | AD_input_Clear;
         start_Measurement_timer();
         return;
     }
@@ -778,13 +769,13 @@ void Measurement(void)
     {
         Meas_phase = MEAS_PHASE_READ_RESULT;
         // start ADC measurement
-        PORTD = (PORTD & ~AD_Input_Mask) | AD_input_2V5;
+        PORTD = (PORTD & ~AD_Input_Mask) | AD_input_Minus_2V5;
         start_Measurement_timer();
         return;
     }
         
     // print measurement result ---------------------------------------
-    if (Meas_phase == 3 /*MEAS_PHASE_READ_RESULT*/)
+    if (Meas_phase == MEAS_PHASE_READ_RESULT)
     {
         // read timer value for measurements
         uint16_t meas_time = ((OCR2B << 8) | TCNT2);
@@ -838,7 +829,7 @@ void Measurement(void)
             
         // clear flags
         Meas_phase = MEAS_PHASE_CLEAR_INTEGRATOR;
-        Timer2_run_flag = 0;
+        Timer2_running = FALSE;
             
         // set UI-Limits
         set_UI_Limits();
@@ -846,6 +837,58 @@ void Measurement(void)
         if (Hold_time > 0)  Hold_time--;
         if (flash_time > 0) flash_time--;
     }
+}
+
+
+//*************************************************************************
+// Voltage/Current measurement for calibration
+//*************************************************************************
+uint16_t singleMeasurement(uint8_t uiflag)
+{
+    uint16_t result = 0;
+    uint16_t old_result = 0;
+    uint8_t  stable_result_count = 0;
+    uint8_t i=0;
+    
+    for (i=0; i<50; i++)
+    {
+        old_result = result;
+        
+        // Phase 0  
+        PORTD = (PORTD & ~AD_Input_Mask) | AD_input_Clear;
+        start_Measurement_timer();
+
+        while (Timer2_running) {};   // busy waiting
+
+        // Phase 1
+        PORTD = (PORTD & ~AD_Input_Mask) | (uiflag == UI_FLAG_U ? AD_input_U : AD_input_I);
+        start_Measurement_timer();
+
+        while (Timer2_running) {};
+        
+        // Phase 2
+        PORTD = (PORTD & ~AD_Input_Mask) | AD_input_Minus_2V5;
+        start_Measurement_timer();
+
+        while (Timer2_running) {};
+        
+        // Phase 3
+        result = (OCR2B << 8) | TCNT2;
+
+        if (old_result == result)        
+        {
+            if (++stable_result_count == 5)
+            {
+                break;
+            }
+        }
+        else
+        {
+            stable_result_count = 0;
+        }
+    };
+
+    return result;
 }
 
 //*************************************************************************
@@ -990,93 +1033,48 @@ void save_eeprom_ulimit(uint16_t ulim)
 }
 
 //*************************************************************************
-// read Ulimit (EEPROM addr. 0x000)
+// read Ulimit (EEPROM addr. 0x00)
 //*************************************************************************
 uint16_t read_eeprom_ulimit(void)
 {
-    uint16_t *eeAddr =  (uint16_t*) 0;
+    uint16_t *eeAddr =  (uint16_t*) 0x00;
     return eeprom_read_word(eeAddr);
 }
 
 //*************************************************************************
-// save Ilimit (eeprom addr. 0x002)
+// save Ilimit (eeprom addr. 0x02)
 //*************************************************************************
 void save_eeprom_ilimit(uint16_t ilim)
 {
-    uint16_t *eeAddr = (uint16_t*) 2;
+    uint16_t *eeAddr = (uint16_t*) 0x02;
     eeprom_write_word(eeAddr, ilim);
 }
 
 //*************************************************************************
-// read Ilimit (eeprom addr. 0x002)
+// read Ilimit (eeprom addr. 0x02)
 //*************************************************************************
 uint16_t read_eeprom_ilimit (void)
 {
-    uint16_t *eeAddr = (uint16_t*) 2;
+    uint16_t *eeAddr = (uint16_t*) 0x02;
     return eeprom_read_word(eeAddr);
 }
 
 //*************************************************************************
-// read magic_calib (eeprom addr. 0x004)
-//*************************************************************************
-uint8_t is_calibration_valid(void)
-{
-    uint16_t *eeAddr = (uint16_t*) 4;
-    uint16_t magic = eeprom_read_word(eeAddr);
-    return magic == CALIB_MAGIC_WORD;
-}
-
-//*************************************************************************
-// set magic_calib (eeprom addr. 0x004)
-//*************************************************************************
-void set_calibration_valid(void)
-{
-    uint16_t *eeAddr = (uint16_t*) 4;
-    eeprom_write_word(eeAddr, CALIB_MAGIC_WORD);
-}
-
-//*************************************************************************
-// set calibration data (eeprom addr. 0x006, 0x008, 0x00A, 0x00C)
-//*************************************************************************
-void save_calibration_data(void)
-{
-    uint16_t *eeAddr = (uint16_t*) 6;
-    eeprom_write_word(eeAddr+0, calib_counts_offset_0V);
-    eeprom_write_word(eeAddr+1, calib_counts_per_20V);
-    eeprom_write_word(eeAddr+2, calib_counts_offset_0mA);
-    eeprom_write_word(eeAddr+3, calib_counts_per_1200mA);
-    
-    set_calibration_valid();
-}
-
-//*************************************************************************
-// read calibration data (eeprom addr. 0x006, 0x008, 0x00A, 0x00C)
-//*************************************************************************
-void read_calibration_data(void)
-{
-    uint16_t *eeAddr = (uint16_t*) 6;
-    calib_counts_offset_0V  = eeprom_read_word(eeAddr);
-    calib_counts_per_20V    = eeprom_read_word(eeAddr+1);
-    calib_counts_offset_0mA = eeprom_read_word(eeAddr+2);
-    calib_counts_per_1200mA = eeprom_read_word(eeAddr+3);
-}
-
-//*************************************************************************
-// save display settings (eeprom addr. 0x00E)
+// save display settings (eeprom addr. 0x04)
 //*************************************************************************
 void save_eeprom_display_settings(uint8_t contrast, uint8_t backlit)
 {
-    uint16_t *eeAddr = (uint16_t*) 0x0e;
+    uint16_t *eeAddr = (uint16_t*) 0x08;
     uint16_t word = (contrast & 0x07) | (backlit & 0x01)<<7 | DISPLAY_MAGIC_WORD;
     eeprom_write_word(eeAddr, word);
 }
 
 //*************************************************************************
-// save display settings (eeprom addr. 0x00E)
+// save display settings (eeprom addr. 0x04)
 //*************************************************************************
 void read_eeprom_display_settings(uint8_t *contrast, uint8_t *backlit)
 {
-    uint16_t *eeAddr = (uint16_t*) 0x0e;
+    uint16_t *eeAddr = (uint16_t*) 0x08;
     uint16_t word = eeprom_read_word(eeAddr);
     if ((word & 0xff00) == DISPLAY_MAGIC_WORD)
     {
@@ -1090,6 +1088,81 @@ void read_eeprom_display_settings(uint8_t *contrast, uint8_t *backlit)
         *contrast = 7;
         *backlit = 1;
     }
+}
+
+//*************************************************************************
+// read magic_calib (eeprom addr. 0x0E)
+//*************************************************************************
+uint8_t is_calibration_valid(void)
+{
+    uint16_t *eeAddr = (uint16_t*) 0x0E;
+    uint16_t magic = eeprom_read_word(eeAddr);
+    return magic == CALIB_MAGIC_WORD;
+}
+
+//*************************************************************************
+// set magic_calib (eeprom addr. 0x00E)
+//*************************************************************************
+void set_calibration_valid(void)
+{
+    uint16_t *eeAddr = (uint16_t*) 0x0E;
+    eeprom_write_word(eeAddr, CALIB_MAGIC_WORD);
+}
+
+//*************************************************************************
+// set calibration data (eeprom addr. 0x10..0x1F)
+//*************************************************************************
+void save_calibration_data(void)
+{
+    uint16_t *eeAddr = (uint16_t*) 0x10;
+    eeprom_write_word(eeAddr+0, calib_counts_offset_0V);
+    eeprom_write_word(eeAddr+1, calib_counts_per_20V);
+    eeprom_write_word(eeAddr+2, calib_counts_offset_0mA);
+    eeprom_write_word(eeAddr+3, calib_counts_per_1200mA);
+
+    eeprom_write_word(eeAddr+4, meas_counts_offset_0V);
+    eeprom_write_word(eeAddr+5, meas_counts_per_20V);
+    eeprom_write_word(eeAddr+6, meas_counts_offset_0mA);
+    eeprom_write_word(eeAddr+7, meas_counts_per_1200mA);
+    
+    set_calibration_valid();
+}
+
+//*************************************************************************
+// read calibration data (eeprom addr. 0x10..0x1F
+//*************************************************************************
+void read_calibration_data(void)
+{
+    uint16_t *eeAddr = (uint16_t*) 0x10;
+    calib_counts_offset_0V  = eeprom_read_word(eeAddr+0);
+    calib_counts_per_20V    = eeprom_read_word(eeAddr+1);
+    calib_counts_offset_0mA = eeprom_read_word(eeAddr+2);
+    calib_counts_per_1200mA = eeprom_read_word(eeAddr+3);
+
+    meas_counts_offset_0V   = eeprom_read_word(eeAddr+4);
+    meas_counts_per_20V     = eeprom_read_word(eeAddr+5);
+    meas_counts_offset_0mA  = eeprom_read_word(eeAddr+6);
+    meas_counts_per_1200mA  = eeprom_read_word(eeAddr+7);
+}
+
+//*************************************************************************
+// save UI data to Memory (eeprom addr. 0x20..0x5F)
+//*************************************************************************
+void wr_eeprom_memory (uint8_t nr, int16_t ulim, int16_t ilim)
+{
+    uint16_t *eeAddr = (uint16_t*) (0x20 + (nr * 4));
+    eeprom_write_word(eeAddr, ulim);
+    eeprom_write_word(eeAddr+1, ilim);
+}
+
+//*************************************************************************
+// read UI data from Memory (eeprom addr. 0x20..0x5F)
+//*************************************************************************
+void rd_eeprom_memory (uint8_t nr, int16_t *ulim, int16_t *ilim)
+{
+    uint16_t *eeAddr = (uint16_t*) (0x20 + (nr * 4));
+    *ulim = eeprom_read_word(eeAddr);
+    *ilim = eeprom_read_word(eeAddr+1);
 }
 
 
@@ -1298,26 +1371,6 @@ void flash_PrgNo (void)
 } 
 
 //*************************************************************************
-// save UI data to Memory
-//*************************************************************************
-void wr_eeprom_memory (uint8_t nr, int16_t ulim, int16_t ilim)
-{
-    uint16_t *eeAddr = (uint16_t*) (0x10 + (nr * 4));
-    eeprom_write_word(eeAddr, ulim);
-    eeprom_write_word(eeAddr+1, ilim);
-}
-
-//*************************************************************************
-// read UI data from Memory
-//*************************************************************************
-void rd_eeprom_memory (uint8_t nr, int16_t *ulim, int16_t *ilim)
-{
-    uint16_t *eeAddr = (uint16_t*) (0x10 + (nr * 4));
-    *ulim = eeprom_read_word(eeAddr);
-    *ilim = eeprom_read_word(eeAddr+1);
-}
-
-//*************************************************************************
 // press Button
 //*************************************************************************
 void pressButton (uint8_t button)
@@ -1479,22 +1532,27 @@ void init_UIlimits (void)
     
 }
 
-int16_t calibration_user(uint16_t is_U)
+int16_t calibration_user(uint8_t ui_flag)
 {
-    uint16_t ocrval_start = is_U ? OCR1A : OCR1B;
+    uint16_t ocrval_start = ui_flag == UI_FLAG_U ? OCR1A : OCR1B;
     int16_t ocrval_diff = 0;
     do
     {
         pull_encoder();
         int diff = encode_read4();
         ocrval_diff += diff;
-        if (is_U)
+        if (ui_flag == UI_FLAG_U)
             OCR1A = ocrval_start + ocrval_diff ;
         else
             OCR1B = ocrval_start + ocrval_diff ;
         
         print_value_signed(I_act_cmd, ocrval_diff);
     } while ((PINC & (1<<B_Enter)) != 0);
+    
+    wr_SPI_buffer5(I_act_cmd, 0x5d, 0x5d, 0x5d, 0x5d);
+    soft_delay(300);
+    print_value_signed(I_act_cmd, ocrval_diff);
+    soft_delay(1000);
     
     return ocrval_start + ocrval_diff;
 }        
@@ -1538,8 +1596,10 @@ void startup_calibration(void)
 
         uint16_t u_refs[] = { u_ref_low, u_ref_high };
         uint16_t i_refs[] = { i_ref_low, i_ref_high };
-        uint16_t ocrs[] = { 0, 0 };
-
+        uint16_t ocrs[] = { 0, 0, 0 };
+        uint16_t u_meas[2];
+        uint16_t i_meas[2];
+        
         //wr_SPI_buffer5(P_act_cmd, 0x5D, 0x5D, 0x5D, 0x5D); // Clr P display
             
         // Voltage calibration
@@ -1558,16 +1618,16 @@ void startup_calibration(void)
             wr_SPI_buffer3(set_I4_underline);
 
             soft_delay(200);
-            ocrs[i] = calibration_user(1);
+            ocrs[i] = calibration_user(UI_FLAG_U);
+            
+            u_meas[i] = singleMeasurement(UI_FLAG_U);
         }
 
         calib_counts_per_20V = ocrs[1] - ocrs[0];
         calib_counts_offset_0V = ocrs[0] - calib_counts_per_20V / 4;   // subtract 5V to get offset @0V
 
-        //wr_SPI_buffer5(U_act_cmd, 0x5D, 0x5B, 0x5A, 0x5C);  // "CAL"
-        //print_value(I_act_cmd, calib_counts_per_20V/2);     // Print Counts per 10V (we have only 4 digits!) (~5005)
-        //print_value(P_act_cmd, calib_counts_offset_0V);     // Print offset (~122)
-        //soft_delay(5000);
+        meas_counts_per_20V = u_meas[1] - u_meas[0];
+        meas_counts_offset_0V = u_meas[0] - meas_counts_per_20V / 4;
 
         // Current calibration
         set_Usoll(12000);           // 12V
@@ -1589,19 +1649,18 @@ void startup_calibration(void)
             send_LCD_commands(Activ_A);
 
             soft_delay(200);
-            ocrs[i] = calibration_user(0);
+            ocrs[i] = calibration_user(UI_FLAG_I);
+            
+            i_meas[i] = singleMeasurement(UI_FLAG_I);
         }
 
         calib_counts_per_1200mA = ocrs[1] - ocrs[0];
         calib_counts_offset_0mA = ocrs[0] - calib_counts_per_1200mA / 4;   // subtract 300mA get offset @0mA
 
-        //wr_SPI_buffer5(U_act_cmd, 0x5D, 0x5B, 0x5A, 0x5C);  // "CAL"
-        //print_value(I_act_cmd, calib_counts_per_1200mA);    // Print Counts per 1200mA) (~6000)
-        //print_value(P_act_cmd, calib_counts_offset_0mA);    // Print offset (~120)
-        //soft_delay(5000);
+        meas_counts_per_1200mA = i_meas[1] - i_meas[0];
+        meas_counts_offset_0mA = i_meas[0] - meas_counts_per_1200mA / 4;
 
         save_calibration_data();
-
     }
     
     send_LCD_commands(LCD_inits);
@@ -1679,11 +1738,11 @@ int main(void)
     init_Timer2();      // for ADC measurements
     init_Encoder();
     init_LCD();
+    init_Interrupt();
     
     startup_calibration();
 
     init_UIlimits();
-    init_Interrupt();
             
     // Main loop ---------------------------------------------------------
     while(1) {	
