@@ -18,9 +18,14 @@
 
 // defines ---------------------------------------------------------------
 
-#define VERSION 199
-#define BUILD   006
+#define TRUE 	1
+#define FALSE 	0
 
+// version info
+#define VERSION 199
+#define BUILD   007
+
+// default calibration values
 #define CALIB_COUNTS_PER_20V_DEFAULT           10022
 #define CALIB_COUNTS_OFFSET_0V_DEFAULT           123
 #define CALIB_COUNTS_PER_1200MA_DEFAULT         5758
@@ -35,31 +40,34 @@
 #define DISPLAY_MAGIC_WORD 0xcc00
 
 #define F_CPU 8000000UL
-#define ADC_AD0     PD4  
-#define ADC_AD1     PD5	 
-#define ADC_AD2     PD7	 
+
+// Pin definitions
 #define ADC_ADW     PB0	
-#define FAN         PD6 
-#define B_Standby   PC3	 
-#define B_UI        PC1
+#define PWM_U       PB1
+#define PWM_I       PB2
+#define SPI_SS      PB2  /* why is this not conflicting with PWM_I??? */
+#define SPI_MOSI    PB3
+#define SPI_MISO    PB4
+#define SPI_SCK     PB5
+
 #define B_Left      PC0
+#define B_UI        PC1
 #define B_Right     PC2
-#define B_Recall    PD1
+#define B_Standby   PC3
 #define B_Enter     PC4
 #define B_Memory    PC5
+
 #define Regulator   PD0
-#define Enc_A       PD3
+#define B_Recall    PD1
 #define Enc_B       PD2
+#define Enc_A       PD3
+#define ADC_AD0     PD4
+#define ADC_AD1     PD5
+#define PWM_FAN     PD6
+#define ADC_AD2     PD7
+
 #define PHASE_A     (PIND & 1<<Enc_A)
 #define PHASE_B     (PIND & 1<<Enc_B)
-
-#define TRUE 	1
-#define FALSE 	0
-
-#define SPI_MOSI    3     // PC5 = SPI MOSI
-#define SPI_MISO    4     // PC6 = SPI MISO
-#define SPI_SCK     5     // PC7 = SPI SCK
-#define SPI_SS      2     // PC4 = SPI SS
 
 #define NOP() asm volatile ("nop" ::) 
 
@@ -142,8 +150,12 @@ void send_LCD_commands (const uint8_t Com_Adr[]);
 void print_degree(uint16_t value);
 void set_memory_nr (void);
 void flash_PrgNo(void);
-void displaySettings(void);
+void startDisplaySettings(void);
+void handleDisplaySettings(void);
 void printContrast(uint8_t contrast);
+void printIllu(uint8_t illum);
+void triggerBacklitTimeout(void);
+void checkBacklitTimeout(void);
 
 
 // global variables ------------------------------------------------------
@@ -171,8 +183,7 @@ uint8_t flash_time = 5;
 uint8_t blinki_flag = 0;
 int16_t U_meas = 0;
 int16_t I_meas = 0;
-uint32_t buttonPressDuration[BUTTON_COUNT];
-uint32_t buttonReleaseDuration[BUTTON_COUNT];
+uint32_t buttonPressEvent[BUTTON_COUNT] = { 0,0,0,0,0,0,0 };
 
 uint16_t calib_counts_per_20V    = CALIB_COUNTS_PER_20V_DEFAULT;
 uint16_t calib_counts_offset_0V  = CALIB_COUNTS_OFFSET_0V_DEFAULT;
@@ -183,6 +194,19 @@ uint16_t meas_counts_per_20V     = CALIB_COUNTS_MEAS_PER_20V_DEFAULT;
 uint16_t meas_counts_offset_0V   = CALIB_COUNTS_MEAS_0V_OFFSET_DEFAULT;
 uint16_t meas_counts_per_1200mA  = CALIB_COUNTS_MEAS_PER_1200MA_DEFAULT;
 uint16_t meas_counts_offset_0mA  = CALIB_COUNTS_MEAS_0MA_OFFSET_DEFAULT;
+
+#define MENU_CONTRAST 0
+#define MENU_BACKLIT 1
+uint8_t displaySettingsActive = FALSE;
+uint8_t contrast;
+uint8_t backlit;
+uint8_t menu_contrast = MENU_CONTRAST;
+
+uint32_t lastButtonActivity = 0;
+uint32_t backlitState = 1;
+
+#define TICKS_PER_SECOND 862 
+uint32_t runtime = 0;
 
 // LCD commands
 
@@ -259,7 +283,7 @@ uint16_t meas_counts_offset_0mA  = CALIB_COUNTS_MEAS_0MA_OFFSET_DEFAULT;
 
 const uint8_t clr_Digit_Lines[] PROGMEM = {24, clr_U_underlines, clr_I_underlines};
     
-const uint8_t Standby_on[]  PROGMEM = {10, Standby_On_cmd, set_standby, 0x20,0x05,0x1D, 0x27,0x03,0x1D};
+const uint8_t Standby_on[]  PROGMEM = {10, Standby_On_cmd, set_standby, clr_active_V, clr_active_A};
 const uint8_t Standby_off[] PROGMEM = {4, Standby_Off_cmd, clr_standby};
     
 //const uint8_t Degree_Symbol[] PROGMEM = {12, 0x23,0x02,0x31, 0x30,0x17,0x20, 0x30,0x26,0x38, 0x30,0x24,0x17};
@@ -268,11 +292,6 @@ const uint8_t Activ_V[] PROGMEM = {6, set_active_V, clr_active_A};
 const uint8_t Activ_A[] PROGMEM = {6, set_active_A, clr_active_V};
 
 const uint8_t clr_Memory[] PROGMEM = {8, clr_memory, Memory_nr_cmd,0x5D,0x5D,0x5D,0x5D};
-
-//const uint8_t LCD_inits[] PROGMEM = {60, set_V_symbol,   set_V_point,    set_A_symbol,   set_A_point,
-//                                         0x00,0x23,0x38, set_U_limit,    set_V_Ulimit,   0x04,0x27,0x34,
-//                                         set_I_limit,    set_V_Ulimit,   set_U2_underline,
-
 
 const uint8_t LCD_inits[] PROGMEM = {54, set_V_symbol, set_V_point,
                                          set_A_symbol, set_A_point,
@@ -291,6 +310,8 @@ const uint8_t clr_unit_display[]     PROGMEM = {15, clr_V_symbol, clr_A_symbol, 
 const uint8_t clr_all_digits[] PROGMEM = { 15, U_act_cmd,0x5D, 0x5D, 0x5D, 0x5D,
                                                I_act_cmd,0x5D, 0x5D, 0x5D, 0x5D,
                                                P_act_cmd,0x5D, 0x5D, 0x5D, 0x5D };
+
+const uint8_t illu_values[] PROGMEM = { 0, 1, 5, 10, 30, 60};
 
 //*************************************************************************
 // soft delay
@@ -313,11 +334,11 @@ void soft_delay (uint16_t time_value)
 void init_SPI(void)
 {
     DDRB |= (1<<SPI_SS)|(1<<SPI_MOSI)|(1<<SPI_SCK); // SCK, MOSI and SS as outputs
-    DDRB &= ~(1<<SPI_MISO);							// MISO as input
+    DDRB &= ~(1<<SPI_MISO);                         // MISO as input
     PORTB |= (1<< SPI_MISO);
-    SPCR |= (1<<MSTR);								// Set as Master
-    SPCR |= (1<<SPR0) | (1<<CPOL) | (1<<CPHA);		// set CLK 500KHz and SPI Mode
-    SPCR |= (1<<SPE);								// Enable SPI
+    SPCR |= (1<<MSTR);                              // Set as Master
+    SPCR |= (1<<SPR0) | (1<<CPOL) | (1<<CPHA);      // set CLK 500KHz and SPI Mode
+    SPCR |= (1<<SPE);                               // Enable SPI
 }
 
 //*************************************************************************
@@ -385,33 +406,37 @@ void init_Timer1(void)
 //*************************************************************************
 void init_IO_Port(void)
 {	
+    // Outputs
     DDRD |= ((1<<ADC_AD0) | (1<<ADC_AD1) | (1<<ADC_AD2));	// Multiplexer IC6 
-    DDRB &= ~(1<<ADC_ADW);		// extern PCINT0 for Meassurement
-    DDRB |= (1<<PIN1);			// PB1 OC1A	PWM Voltage
-    DDRB |= (1<<PIN2);			// PB2 OC1B	PWM Ampere
-    DDRC |= (1<<B_Standby);		// Key "Standby"
-    DDRD &= ~(1<<B_Recall);		// Key "Recall"
-    DDRC &= ~(1<<B_Memory);		// Key "Memory"
-    DDRC &= ~(1<<B_Enter);		// Key "Enter"
-    DDRD &= ~(1<<Regulator);	// Regler
-    DDRD &= ~(1<<Enc_A);		// Encoder Pin A
-    DDRD &= ~(1<<Enc_B);		// Encoder Pin B
-    DDRC &= ~(1<<B_UI);			// Key "U/I"
-    DDRC &= ~(1<<B_Left);		// Key "<-"
-    DDRC &= ~(1<<B_Right);		// Key "->"
-    DDRD |= (1<<PIN6);			// FAN PWM out
-    
-    PORTB |= (1<<ADC_ADW);		// Pullup enabled
-    PORTC |= (1<<B_UI);			// Pullup UI switch
-    PORTD |= (1<<Regulator);	// Pullup Regler
-    PORTD |= (1<<B_Recall);		// Pullup Key Recall
-    PORTC |= (1<<B_Standby);	// Pullup Key Standby
-    PORTC |= (1<<B_Memory);		// Pullup Key "Memory"
-    PORTC |= (1<<B_Enter);		// Pullup Key "Enter"
-    PORTD |= (1<<Enc_A);		// Pullup Encoder Pin A
-    PORTD |= (1<<Enc_B);		// Pullup Encoder Pin B
-    PORTC |= (1<<B_Left);		// Pullup Key "<-"
-    PORTC |= (1<<B_Right);		// Pullup Key "->"
+    DDRB |= (1<<PWM_U);         // PB1 OC1A	PWM Voltage
+    DDRB |= (1<<PWM_I);         // PB2 OC1B	PWM Ampere
+    DDRD |= (1<<PWM_FAN);       // FAN PWM out
+
+    // Inputs
+    DDRB &= ~(1<<ADC_ADW);      // extern PCINT0 for Measurement
+    DDRC &= ~(1<<B_Memory);     // Key "Memory"
+    DDRC &= ~(1<<B_Enter);      // Key "Enter"
+    DDRC &= ~(1<<B_UI);         // Key "U/I"
+    DDRC &= ~(1<<B_Left);       // Key "<-"
+    DDRC &= ~(1<<B_Right);      // Key "->"
+    DDRC &= ~(1<<B_Standby);    // Key "Standby"
+    DDRD &= ~(1<<B_Recall);     // Key "Recall"
+    DDRD &= ~(1<<Regulator);    // Indicates which Regulator (U/I) is active
+    DDRD &= ~(1<<Enc_A);        // Encoder Pin A
+    DDRD &= ~(1<<Enc_B);        // Encoder Pin B
+
+    // Pullups for all Inputs    
+    PORTB |= (1<<ADC_ADW);
+    PORTC |= (1<<B_Memory);
+    PORTC |= (1<<B_Enter);
+    PORTC |= (1<<B_UI);
+    PORTC |= (1<<B_Left);
+    PORTC |= (1<<B_Right);
+    PORTC |= (1<<B_Standby);
+    PORTD |= (1<<B_Recall);
+    PORTD |= (1<<Regulator);
+    PORTD |= (1<<Enc_A);
+    PORTD |= (1<<Enc_B);
     
 }
 
@@ -433,13 +458,14 @@ void print_value(uint8_t cmd_index, uint16_t value)
     {
         digit[0] = 0x5D;	// if first digit 0 than print "Space"
     }
+    
     value %= 1000;
     digit[1] = (value/100)+0x50;
     value %= 100;
     digit[2] = (value/10)+0x50;
     value %= 10;
     digit[3] = (value/1)+0x50;
-                
+    
     wr_SPI_buffer5(cmd_index, digit[3], digit[2], digit[1], digit[0]);
 }
 
@@ -500,7 +526,7 @@ void init_Interrupt(void)
 //-------------------------------------------------------------------------
 void init_Timer2(void)
 {	
-    TCCR2B |= (1<<CS00) | (1<<CS01);	// Prescaler 64  (4us) 
+    TCCR2B |= (1<<CS20) | (1<<CS21);                    // Prescaler 32 (4us)
 }
 
 //-------------------------------------------------------------------------
@@ -508,9 +534,9 @@ void init_Timer2(void)
 //-------------------------------------------------------------------------
 void init_Timer0(void)
 {
-    TCCR0B |= (1<<CS00)|(1<<CS01);						// prescaler 64
-    TCCR0A |= (1<<COM0A1) | (1<<WGM00) | (1<<WGM01);	// Set OC2B at bottom, clear OC2BFdegree
-    OCR0A = 127;										// 100% Fan-PWM 
+    TCCR0B |= (1<<CS00) | (1<<CS01);                    // prescaler 64
+    TCCR0A |= (1<<COM0A1) | (1<<WGM00) | (1<<WGM01);    // Set OC2B at bottom, clear OC2BF
+    OCR0A = 127;                                        // 100% Fan-PWM 
 }
 
 //*************************************************************************
@@ -522,23 +548,12 @@ void start_Measurement_timer(void)
     OCR2B = 0;
     TCNT2 = 10;
         
-    if (Meas_phase == MEAS_PHASE_READ_RESULT) {
-        ADW_flag = 1;
-    }
-    else ADW_flag = 0;
+    ADW_flag = Meas_phase == MEAS_PHASE_READ_RESULT ? TRUE : FALSE;
     
-    // set overflow Interrupt
-    TIMSK2 |= (1<<TOIE2);
-    
-    // clear Timer2 overflow_flag
-    TIFR2 |= (1<<TOV2);
-    
-    // clear extern INT0 Flag
-    PCIFR |= (1<<PCIF0);
-    
-    // start Timer 2
-    TCCR2B |= (1<<CS00)| (1<<CS01);
-    
+    TIMSK2 |= (1<<TOIE2);               // set overflow Interrupt
+    TIFR2  |= (1<<TOV2);                // clear Timer2 overflow_flag
+    PCIFR  |= (1<<PCIF0);               // clear extern INT0 Flag
+    TCCR2B |= (1<<CS20)| (1<<CS21);     // start Timer 2
     Timer2_running = TRUE;  
 }
 
@@ -549,13 +564,20 @@ ISR(TIMER2_OVF_vect)
 {   
     OCR2B++;
   
-    if (OCR2B == 48 && ADW_flag == 0)
+    if (OCR2B >= 48 && ADW_flag == 0)       // was "OCR2B == 48"; purpose???
     {
         TCCR2B &= ~((1<<CS00) | (1<<CS01)); // stop timer
         Timer2_running = FALSE;
 
         PORTD |= AD_input_None;
-   }
+    }
+   
+    runtime++;   // 256*4us = 1.024ms plus the time the timer is not running...
+                // measured: 1.16ms; use 1000/1.16 = 862 as a divider to get seconds (pi*thumb)
+    if (runtime%TICKS_PER_SECOND == 0)
+    {
+        checkBacklitTimeout();
+    }
 }
 
 //*************************************************************************
@@ -564,7 +586,7 @@ ISR(TIMER2_OVF_vect)
 ISR(PCINT0_vect)
 {
     // falling edge
-    if (!(PINB & (1<<PB0)))
+    if (!(PINB & (1<<ADC_ADW)))
     {
         TCCR2B &= ~((1<<CS00) | (1<<CS01)); // stop timer
         Timer2_running = FALSE;
@@ -623,9 +645,10 @@ void print_I_result(uint16_t meas_time)
 //*************************************************************************
 void print_T_heatsink_result(uint16_t meas_time)
 {	
-    #define Digital_offset_b 6000  // Calibration to be done
+    #define calib_offset_temp 6000      // Calibration to be done
+    #define calib_factor_temp 196608    // Calibration to be done (use 196608/65536 = 3 as a starting point)
     
-    uint16_t result = (((uint32_t)meas_time - Digital_offset_b) * 198902) >> 16;
+    uint16_t result = (((uint32_t)meas_time - calib_offset_temp) * calib_factor_temp) >> 16;
 
     if (! (Memory_flag || Recall_flag))
     {
@@ -669,9 +692,7 @@ void print_T_heatsink_result(uint16_t meas_time)
 //*************************************************************************
 void print_T_transformer_result(uint16_t meas_time)
 {	
-    #define Digital_offset_b 6000  // Calibration to be done (shared with T1?)
-    
-    uint16_t result = (((uint32_t)meas_time - Digital_offset_b) * 198902) >> 16;
+    uint16_t result = (((uint32_t)meas_time - calib_offset_temp) * calib_factor_temp) >> 16;
     
     if (! (Memory_flag || Recall_flag))
     {
@@ -701,14 +722,15 @@ void pull_encoder(void)
     if( diff & 1 ) {                    // bit 0 = value (1)
         enc_last = new;                 // store new as next last
         enc_delta += (diff & 2) - 1;    // bit 1 = direction (+/-)
+        
     }
+    if (diff) triggerBacklitTimeout();
 }
 
 // read Encoder ----------------------------------------------------------
-int8_t encode_read4(void)               // read fou- step-encoder
+int8_t encode_read4(void)               // read four-step-encoder
 {
-    int8_t val;
-    val = enc_delta;
+    int8_t val = enc_delta;
     enc_delta = val & 3;
     return val >> 2;
 }
@@ -782,22 +804,24 @@ void Measurement(void)
 
         ADW_flag = 0;
             
-        if (Meas_type == MEAS_TYPE_U)
+        if (!displaySettingsActive)
         {
-            if (enc_changed == FALSE && Hold_time == 0)
+            if (Meas_type == MEAS_TYPE_U)
             {
-                print_U_result(meas_time);
+                if (enc_changed == FALSE && Hold_time == 0)
+                {
+                    print_U_result(meas_time);
+                }
+            }
+            
+            if (Meas_type == MEAS_TYPE_I)
+            {
+                if (enc_changed == FALSE && Hold_time == 0)
+                {
+                    print_I_result(meas_time);
+                }
             }
         }
-            
-        if (Meas_type == MEAS_TYPE_I)
-        {
-            if (enc_changed == FALSE && Hold_time == 0)
-            {
-                print_I_result(meas_time);
-            }
-        }
-            
         if (Meas_type == MEAS_TYPE_T_TRANSFORMER)
         {
             print_T_transformer_result(meas_time);
@@ -948,24 +972,22 @@ void set_UI_Limits(void)
 void set_memory_nr (void)
 {
     // read encoder ------------------------------------------------------
-    int Enc_value = encode_read4();
+    int diff = encode_read4();
     
-    if (Enc_value == 0)
+    if (diff == 0)
     {
         enc_changed = FALSE;
         return;
     }
     else enc_changed = TRUE;
     
-    Memory_nr = Memory_nr + Enc_value;
-    
-    if (Memory_nr >= 15)
+    if (diff > 0 && Memory_nr < 15)
     {
-        Memory_nr = 15;
+        Memory_nr++;
     }
-    else if (Memory_nr < 0)
+    else if (diff < 0 && Memory_nr > 0)
     {
-        Memory_nr = 0;
+        Memory_nr--;
     }
     print_memory_nr(Memory_nr);
      
@@ -1065,7 +1087,7 @@ uint16_t read_eeprom_ilimit (void)
 void save_eeprom_display_settings(uint8_t contrast, uint8_t backlit)
 {
     uint16_t *eeAddr = (uint16_t*) 0x08;
-    uint16_t word = (contrast & 0x07) | (backlit & 0x01)<<7 | DISPLAY_MAGIC_WORD;
+    uint16_t word = (contrast & 0x07) | (backlit & 0x07)<<4 | DISPLAY_MAGIC_WORD;
     eeprom_write_word(eeAddr, word);
 }
 
@@ -1080,7 +1102,7 @@ void read_eeprom_display_settings(uint8_t *contrast, uint8_t *backlit)
     {
         // Setting valid
         *contrast = word & 0x07;
-        *backlit = (word & 0x80) >> 7;
+        *backlit = (word & 0x70) >> 4;
     }
     else
     {
@@ -1204,6 +1226,32 @@ void send_LCD_commands (const uint8_t Com_Adr[])
 //*************************************************************************
 void buttonFunction (uint8_t button)
 {
+    if (displaySettingsActive)
+    {
+        switch (button)
+        {
+            case BUTTON_ENTER:
+                save_eeprom_display_settings(contrast, backlit);
+
+                send_LCD_commands(restore_unit_display);
+                send_LCD_commands(clr_Digit_Lines);
+                setDigitPos();
+                displaySettingsActive = FALSE;
+                break;
+
+            case BUTTON_UI:
+                menu_contrast = menu_contrast ? 0 : 1;
+                
+                if (menu_contrast == MENU_CONTRAST) 
+                    printContrast(contrast);
+                else
+                    printIllu(backlit);
+                break;
+        }
+        
+        return;
+    }
+
     switch (button)
     {
         case BUTTON_STANDBY: 
@@ -1263,10 +1311,7 @@ void buttonFunction (uint8_t button)
         case BUTTON_UI:
         {
             send_LCD_commands(clr_Digit_Lines);
-            if (UI_flag == UI_FLAG_U) 
-                UI_flag = UI_FLAG_I;
-            else 
-                UI_flag = UI_FLAG_U;
+            UI_flag = UI_flag == UI_FLAG_U ? UI_FLAG_I : UI_FLAG_U;
             setDigitPos();
         }
         break;
@@ -1311,24 +1356,31 @@ void buttonFunction (uint8_t button)
     
         case BUTTON_ENTER:
         {
-            if (Recall_flag)
-            { 
-                rd_eeprom_memory(Memory_nr, &Ulimit, &Ilimit);
-                set_Usoll(Ulimit);
-                set_Isoll(Ilimit);
-                print_value(U_limit_cmd, Ulimit);
-                print_value(I_limit_cmd, Ilimit);
-                Hold_time = 0;
-                Refresh_Ulimit = TRUE;
-                Refresh_Ilimit = TRUE;
-            }
-            else if (Memory_flag)
+            if ((Recall_flag) ||  (Memory_flag))
             {
-                wr_eeprom_memory(Memory_nr, Ulimit, Ilimit);
+                if (Recall_flag)
+                { 
+                    rd_eeprom_memory(Memory_nr, &Ulimit, &Ilimit);
+                    set_Usoll(Ulimit);
+                    set_Isoll(Ilimit);
+                    print_value(U_limit_cmd, Ulimit);
+                    print_value(I_limit_cmd, Ilimit);
+                    Hold_time = 0;
+                    Refresh_Ulimit = TRUE;
+                    Refresh_Ilimit = TRUE;
+                }
+                else
+                {
+                    wr_eeprom_memory(Memory_nr, Ulimit, Ilimit);
+                }
+                send_LCD_commands(clr_Memory);
+                Memory_flag = FALSE;
+                Recall_flag = FALSE;
             }
-            send_LCD_commands(clr_Memory);
-            Memory_flag = FALSE;
-            Recall_flag = FALSE;
+            else
+            {
+                // any idea for a function here?
+            }                
         }
         break;
        
@@ -1346,7 +1398,7 @@ void flash_PrgNo (void)
     {
         if (blinki_flag != 0)
         {
-            print_memory_nr(Memory_nr);		// print PrgNo
+            print_memory_nr(Memory_nr);
             if (Recall_flag != 0)
             {
                 int16_t ilim;
@@ -1370,37 +1422,74 @@ void flash_PrgNo (void)
     }
 } 
 
+void longPressButton (uint8_t button)
+{
+    if (button == BUTTON_UI)
+    {
+        startDisplaySettings();
+    }
+}
+
+void triggerBacklitTimeout(void)
+{
+    if (backlitState == 0)
+    {
+        SPI_wr2(Backlit_on_cmd);
+        backlitState = 1;
+    }
+    lastButtonActivity = runtime;
+}
+
+void checkBacklitTimeout(void)
+{
+    uint8_t backlitTimeoutInSeconds = pgm_read_byte(illu_values + backlit) * 60;
+    
+    if ( backlitTimeoutInSeconds &&
+         backlitState &&
+         (runtime-lastButtonActivity)/TICKS_PER_SECOND > backlitTimeoutInSeconds )
+    {
+        SPI_wr2(Backlit_off_cmd);
+        backlitState = 0;
+    }
+}
+
 //*************************************************************************
 // press Button
 //*************************************************************************
-void pressButton (uint8_t button)
+void pressButton (uint8_t b)
 {
-    buttonPressDuration[button]++;
-    if (buttonPressDuration[button] == 500) 
+    if (buttonPressEvent[b] == 0)
     {
-        buttonFunction(button);
+        buttonPressEvent[b] = runtime;               // store time when button first pressed
     }
+    else
+    {
+        if (runtime - buttonPressEvent[b] > 3000)    // 3 seconds
+        {
+            longPressButton(b);
+            buttonPressEvent[b] = runtime-2000;     // do not retrigger in next iteration
+        }
+    }
+    // activate shortpress actions at button release
 
-    if ((button == BUTTON_UI) && buttonPressDuration[button] == 60000) 
-    {
-        displaySettings();
-    }
+    triggerBacklitTimeout();
 }
 
 //*************************************************************************
 // release Button
 //*************************************************************************
-void releaseButton (uint8_t button)
+void releaseButton (uint8_t b)
 {
-    if (buttonPressDuration[button] > 0)
+    if (buttonPressEvent[b] > 0)
     {
-        buttonReleaseDuration[button]++;
-        if (buttonReleaseDuration[button] > 100)
+        // debounce
+        uint32_t pressDuration = runtime - buttonPressEvent[b];
+        if ((pressDuration > 10) && (pressDuration < 2000))
         {
-            buttonReleaseDuration[button] = 0;
-            buttonPressDuration[button] = 0;
-        }
+            buttonFunction(b);
+        }            
     }
+    buttonPressEvent[b] = 0;
 }
 
 //*************************************************************************
@@ -1408,7 +1497,7 @@ void releaseButton (uint8_t button)
 //*************************************************************************
 void readButtons(void)
 {
-    uint16_t pinc = PINC;
+    uint8_t pinc = PINC;
     
     if ((pinc & (1<<B_Standby)) == 0)
          pressButton(BUTTON_STANDBY);
@@ -1444,9 +1533,6 @@ void readButtons(void)
         pressButton(BUTTON_ENTER);
     else 
         releaseButton(BUTTON_ENTER);
-
-    
-
 }
 
 //*************************************************************************
@@ -1671,60 +1757,71 @@ void startup_calibration(void)
 
 void printContrast(uint8_t contrast)
 {
-    wr_SPI_buffer5(I_act_cmd, 0x50+contrast+1, 0x5D, 0x50, 0x5C);
+    wr_SPI_buffer5(U_act_cmd, 0x5d, 0x5D, 0x50, 0x5C);
+    print_value_signed(I_act_cmd, contrast+1);
 }
 
-void displaySettings(void)
+void printIllu(uint8_t illum)
 {
-    uint8_t contrast;
-    uint8_t backlit;
-     
+    wr_SPI_buffer5(U_act_cmd, 0x5d, 0x5b, 0x5b, 0x51);
+    print_value_signed(I_act_cmd,  pgm_read_byte(illu_values + illum));
+}
+
+    
+void startDisplaySettings(void)
+{
     send_LCD_commands(clr_unit_display);
     send_LCD_commands(clr_Digit_Lines);
     send_LCD_commands(clr_all_digits);
     wr_SPI_buffer3(set_I4_underline);
-    printContrast(contrast);
 
     read_eeprom_display_settings(&contrast, &backlit);
     printContrast(contrast);
+    menu_contrast = MENU_CONTRAST;
     
-    do
-    {
-        pull_encoder();
-        int diff = encode_read4();
+    displaySettingsActive = TRUE;
+    
+}
+
+void handleDisplaySettings(void)
+{
+    int diff = encode_read4();
         
-        if (diff> 0 && contrast < 7)
+    if (menu_contrast == MENU_CONTRAST)
+    {
+        if (diff > 0 && contrast < 7)
         {
             contrast++;
             SPI_wr2(LCD_Contrast_cmd + contrast);
             printContrast(contrast);
         }
-        else if (diff<0 && contrast>0)
+        else if (diff < 0 && contrast > 0)
         {
             contrast--;
             SPI_wr2(LCD_Contrast_cmd + contrast);
             printContrast(contrast);
         }
-
-        if ((PINC & (1<<B_Right)) == 0)
+    }
+    else
+    {
+        if ((diff > 0) && (backlit < 5))
         {
+            backlit++;
             SPI_wr2(Backlit_on_cmd);
-            backlit = 1;
-        }        
-        if ((PINC & (1<<B_Left)) == 0)
-        {
-            SPI_wr2(Backlit_off_cmd);
-            backlit = 0;
+            printIllu(backlit);
+            
         }
-    } while ((PINC & (1<<B_Enter)) != 0);
-    
-    save_eeprom_display_settings(contrast, backlit);
-
-    send_LCD_commands(restore_unit_display);
-    send_LCD_commands(clr_Digit_Lines);
-    setDigitPos();
-    
-}    
+        else if ((diff < 0) && (backlit > 0))
+        {
+            backlit--;
+            if (backlit == 0)
+            {
+                SPI_wr2(Backlit_off_cmd);
+            }
+            printIllu(backlit);
+        }
+    }
+}
 
 //*************************************************************************
 // Main
@@ -1745,12 +1842,15 @@ int main(void)
     init_UIlimits();
             
     // Main loop ---------------------------------------------------------
-    while(1) {	
-        Measurement();
+    while(TRUE) 
+    {	
         save_print_UIlimit();
         UI_control();
         pull_encoder();
         readButtons();
-        flash_PrgNo();	
+        flash_PrgNo();
+        Measurement();
+        if (displaySettingsActive)
+            handleDisplaySettings();
     }	
 }

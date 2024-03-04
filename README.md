@@ -21,7 +21,7 @@ WORKING:
 - Voltage Calibration 
 - Current Calibration
 - Measure transformer temperature
-- Menu with LCD contrast/backlit settings (TODO: currently this is blocking normal program flow)
+- Menu with LCD contrast/backlit settings
 - Calibration of internal ADC measurements
 
 NICE TO HAVE:
@@ -32,7 +32,11 @@ IDEAS with hardware modifications:
 - serial remote control (needs re-wiring of button input pins)
 
 ## HISTORY
- 
+
+ - 199b7
+    - partly revised button handling (using timer interrupt for debouncing)
+    - added seperate Contrast / Backlit settings like in original firmware, with backlit timeout in minutes
+
  - 199b6
     - added calibration of internal ADC measurements for U and I
 
