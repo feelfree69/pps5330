@@ -33,6 +33,9 @@ IDEAS with hardware modifications:
 
 ## HISTORY
 
+ - 199b8
+    - added panel lock funtion (long-press "<-" and "->" simultaneously for toggling) like in original firmware
+
  - 199b7
     - partly revised button handling (using timer interrupt for debouncing)
     - added seperate Contrast / Backlit settings like in original firmware, with backlit timeout in minutes

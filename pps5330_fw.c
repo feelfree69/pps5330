@@ -23,7 +23,7 @@
 
 // version info
 #define VERSION 199
-#define BUILD   007
+#define BUILD     8
 
 // default calibration values
 #define CALIB_COUNTS_PER_20V_DEFAULT           10022
@@ -102,7 +102,9 @@
 #define BUTTON_ENTER    6
 #define BUTTON_COUNT    7
 
-
+#define BUTTON_PRESS_DEBOUNCE 10    /* 10ms */
+#define BUTTON_LONGPRESS_FLAG -1    /* must be < 0 */
+#define BUTTON_LONGPRESS_TIME 3000  /* 3 seconds */
 
 // prototypes -------------------------------------------------------------
 void soft_delay (uint16_t time_value);
@@ -144,6 +146,7 @@ void pressButton (uint8_t Button_nr);
 void releaseButton (uint8_t Button_nr);
 void readButtons(void);
 void UI_control(void);
+void display_fw_version(void);
 void init_LCD (void);
 void init_UIlimits (void);
 void send_LCD_commands (const uint8_t Com_Adr[]);
@@ -183,7 +186,7 @@ uint8_t flash_time = 5;
 uint8_t blinki_flag = 0;
 int16_t U_meas = 0;
 int16_t I_meas = 0;
-uint32_t buttonPressEvent[BUTTON_COUNT] = { 0,0,0,0,0,0,0 };
+int32_t buttonPressEvent[BUTTON_COUNT] = { 0,0,0,0,0,0,0 };
 
 uint16_t calib_counts_per_20V    = CALIB_COUNTS_PER_20V_DEFAULT;
 uint16_t calib_counts_offset_0V  = CALIB_COUNTS_OFFSET_0V_DEFAULT;
@@ -204,6 +207,8 @@ uint8_t menu_contrast = MENU_CONTRAST;
 
 uint32_t lastButtonActivity = 0;
 uint32_t backlitState = 1;
+
+uint8_t panel_locked = FALSE;
 
 #define TICKS_PER_SECOND 862 
 uint32_t runtime = 0;
@@ -275,6 +280,9 @@ uint32_t runtime = 0;
 
 #define set_active_A 0x27,0x03,0x32
 #define clr_active_A 0x27,0x03,0x1D
+
+#define set_locked 0x22,0x02,0x31
+#define clr_locked 0x22,0x02,0x1E
 
 #define set_overtemp 0x22,0x01,0x34
 #define clr_overtemp 0x22,0x01,0x11
@@ -715,16 +723,19 @@ void init_Encoder(void)
 // poll Encoder-Port  ----------------------------------------------------
 void pull_encoder(void)
 {
-    int8_t new = 0, diff;
-    if( PHASE_A ) new = 3;
-    if( PHASE_B ) new ^= 1;             // convert gray to binary
-    diff = enc_last - new;              // difference last - new
-    if( diff & 1 ) {                    // bit 0 = value (1)
-        enc_last = new;                 // store new as next last
-        enc_delta += (diff & 2) - 1;    // bit 1 = direction (+/-)
+    if (!panel_locked)
+    {
+        int8_t new = 0, diff;
+        if( PHASE_A ) new = 3;
+        if( PHASE_B ) new ^= 1;             // convert gray to binary
+        diff = enc_last - new;              // difference last - new
+        if( diff & 1 ) {                    // bit 0 = value (1)
+            enc_last = new;                 // store new as next last
+            enc_delta += (diff & 2) - 1;    // bit 1 = direction (+/-)
         
-    }
-    if (diff) triggerBacklitTimeout();
+        }
+        if (diff) triggerBacklitTimeout();
+    }        
 }
 
 // read Encoder ----------------------------------------------------------
@@ -1226,6 +1237,16 @@ void send_LCD_commands (const uint8_t Com_Adr[])
 //*************************************************************************
 void buttonFunction (uint8_t button)
 {
+    // if panel is locked, the only key we care for is setting to standby
+    if (panel_locked && (button == BUTTON_STANDBY) && (Standby_flag == 0))
+    {
+         send_LCD_commands(Standby_on);
+         set_Usoll(0);
+         set_Isoll(0);
+         Standby_flag = 1;
+         return;
+    }
+
     if (displaySettingsActive)
     {
         switch (button)
@@ -1252,9 +1273,11 @@ void buttonFunction (uint8_t button)
         return;
     }
 
-    switch (button)
+    if (!panel_locked)
     {
-        case BUTTON_STANDBY: 
+      switch (button)
+      {
+        case BUTTON_STANDBY:
         {
             // Standby on -------------------------------------------------------- 
             if (Standby_flag == 0) {
@@ -1386,7 +1409,8 @@ void buttonFunction (uint8_t button)
        
         default:
         break;
-     }               
+     }
+   }     
 }
 
 //*************************************************************************
@@ -1422,11 +1446,31 @@ void flash_PrgNo (void)
     }
 } 
 
-void longPressButton (uint8_t button)
+void longPressButton (uint8_t b)
 {
-    if (button == BUTTON_UI)
+    if ((b == BUTTON_UI) && !displaySettingsActive)
     {
         startDisplaySettings();
+    }
+    
+    // LOCK PANEL function
+    if ((b == BUTTON_LEFT) || (b == BUTTON_RIGHT))
+    {
+        // Ensure both buttons are long pressed
+        if ((buttonPressEvent[BUTTON_LEFT]  == BUTTON_LONGPRESS_FLAG ) && 
+            (buttonPressEvent[BUTTON_RIGHT] == BUTTON_LONGPRESS_FLAG))
+        {
+            if (panel_locked)
+            {
+                wr_SPI_buffer3(clr_locked);
+                panel_locked = FALSE;
+            }
+            else
+            {            
+                wr_SPI_buffer3(set_locked);
+                panel_locked = TRUE;
+            }            
+        }
     }
 }
 
@@ -1462,12 +1506,13 @@ void pressButton (uint8_t b)
     {
         buttonPressEvent[b] = runtime;               // store time when button first pressed
     }
-    else
+    
+    if (buttonPressEvent[b] != BUTTON_LONGPRESS_FLAG)
     {
-        if (runtime - buttonPressEvent[b] > 3000)    // 3 seconds
+        if (runtime - buttonPressEvent[b] > BUTTON_LONGPRESS_TIME)
         {
+            buttonPressEvent[b] = BUTTON_LONGPRESS_FLAG; 
             longPressButton(b);
-            buttonPressEvent[b] = runtime-2000;     // do not retrigger in next iteration
         }
     }
     // activate shortpress actions at button release
@@ -1482,9 +1527,7 @@ void releaseButton (uint8_t b)
 {
     if (buttonPressEvent[b] > 0)
     {
-        // debounce
-        uint32_t pressDuration = runtime - buttonPressEvent[b];
-        if ((pressDuration > 10) && (pressDuration < 2000))
+        if (runtime - buttonPressEvent[b] > BUTTON_PRESS_DEBOUNCE)
         {
             buttonFunction(b);
         }            
@@ -1572,7 +1615,7 @@ void display_fw_version(void)
     send_LCD_commands(clr_all_digits);
     wr_SPI_buffer3(set_V_point);
     print_value(U_act_cmd, VERSION*10);
-    print_value(I_act_cmd, BUILD);
+    print_value_signed(I_act_cmd, BUILD);
 }
 
 //*************************************************************************
@@ -1593,7 +1636,7 @@ void init_LCD (void)
 
     display_fw_version();
     soft_delay(3000);
-
+    
     send_LCD_commands(LCD_inits);
     send_LCD_commands(Standby_on);
 }
