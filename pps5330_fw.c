@@ -18,12 +18,12 @@
 
 // defines ---------------------------------------------------------------
 
-#define TRUE 	1
-#define FALSE 	0
-
 // version info
 #define VERSION 199
-#define BUILD     8
+#define BUILD     9
+
+#define TRUE    1
+#define FALSE   0
 
 // default calibration values
 #define CALIB_COUNTS_PER_20V_DEFAULT           10022
@@ -38,8 +38,6 @@
 
 #define CALIB_MAGIC_WORD   0x0ca1
 #define DISPLAY_MAGIC_WORD 0xcc00
-
-#define F_CPU 8000000UL
 
 // Pin definitions
 #define ADC_ADW     PB0	
@@ -74,10 +72,10 @@
 #define AD_Input_Mask          ((1<<ADC_AD0) | (1<<ADC_AD1) | (1<<ADC_AD2))
 #define AD_input_U               0                                          /* Input 0 */
 #define AD_input_I              (1<<ADC_AD0)                                /* Input 1 */
-#define AD_input_T_Transformer  (1<<ADC_AD1)                                /* Input 2 */
+#define AD_input_T_Transformer                 (1<<ADC_AD1)                 /* Input 2 */
 #define AD_input_T_Heatsink    ((1<<ADC_AD0) | (1<<ADC_AD1))                /* Input 3 */
-#define AD_input_Minus_2V5      (1<<ADC_AD2)                                /* Input 4 */
-#define AD_input_Clear         ((1<<ADC_AD0) | (1<<ADC_AD2))                /* Input 5 */
+#define AD_input_Minus_2V5                                    (1<<ADC_AD2)  /* Input 4 */
+#define AD_input_Clear         ((1<<ADC_AD0) |                (1<<ADC_AD2)) /* Input 5 */
 #define AD_input_None          ((1<<ADC_AD0) | (1<<ADC_AD1) | (1<<ADC_AD2)) /* Input 7 */
 
 #define MEAS_TYPE_U             0
@@ -89,6 +87,10 @@
 #define MEAS_PHASE_LOAD_INTEGRATOR     1
 #define MEAS_PHASE_MEASURE_INTEGRATOR  2
 #define MEAS_PHASE_READ_RESULT         3
+
+#define UI_STATUS_U       0
+#define UI_STATUS_I       1
+#define UI_STATUS_STANDBY 2
 
 #define UI_FLAG_U 0
 #define UI_FLAG_I 1
@@ -107,58 +109,86 @@
 #define BUTTON_LONGPRESS_TIME 3000  /* 3 seconds */
 
 // prototypes -------------------------------------------------------------
+
 void soft_delay (uint16_t time_value);
-void SOFT_SPI_init(void);
+
+// init functions
 void init_SPI(void);
-void SPI_wr2(unsigned char dataout);
-void wr_SPI_buffer3(uint8_t data0, uint8_t data1, uint8_t data2);
-void wr_SPI_buffer4(uint8_t data0, uint8_t data1, uint8_t data2, uint8_t data3);
-void wr_SPI_buffer5(uint8_t data0, uint8_t data1, uint8_t data2, uint8_t data3, uint8_t data4);
 void init_IO_Port(void);
-void print_value(uint8_t Index, uint16_t value);
 void init_Interrupt(void);
 void init_Timer0(void);
 void init_Timer1(void);
 void init_Timer2(void);
-uint16_t singleMeasurement(uint8_t uiflag);
-void start_Measurement_timer(void);
+void init_LCD(void);
+void init_UIlimits(void);
+
+// SPI related
+void wr_SPI_buffer1(uint8_t data0);
+void wr_SPI_buffer3(uint8_t data0, uint8_t data1, uint8_t data2);
+void wr_SPI_buffer5(uint8_t data0, uint8_t data1, uint8_t data2, uint8_t data3, uint8_t data4);
+
+
+void print_value(uint8_t Index, uint16_t value);
 void print_U_result(uint16_t meas_time);
 void print_I_result(uint16_t meas_time);
 void print_T_transformer_result(uint16_t meas_time);
 void print_T_heatsink_result(uint16_t meas_time);
-void init_Encoder(void);
-void pull_encoder(void);
-int8_t encode_read4(void);
-void Measurement(void);
+
+void start_Measurement_timer(void);
+uint16_t singleMeasurement(uint8_t uiflag);
+
 void set_UI_Limits(void);
-void save_print_UIlimit (void);
 void set_Usoll (int16_t value);
 void set_Isoll (int16_t value);
+
+void clr_eeprom();
 void save_eeprom_ulimit(uint16_t ulim);
 void save_eeprom_ilimit(uint16_t ilim);
 uint16_t read_eeprom_ulimit(void);
 uint16_t read_eeprom_ilimit(void);
 void wr_eeprom_memory(uint8_t nr, int16_t ulim, int16_t ilim);
 void rd_eeprom_memory(uint8_t nr, int16_t *ulim, int16_t *ilim);
+
 void setDigitPos (void);
-void buttonFunction (uint8_t Button_nr);
-void pressButton (uint8_t Button_nr);
-void releaseButton (uint8_t Button_nr);
-void readButtons(void);
-void UI_control(void);
+
+void init_Encoder(void);
+int8_t encode_read4(void);
+void buttonFunction (uint8_t button);
+void pressButton (uint8_t button);
+void releaseButton (uint8_t button);
+void longPressButton (uint8_t button);
+
 void display_fw_version(void);
-void init_LCD (void);
-void init_UIlimits (void);
 void send_LCD_commands (const uint8_t Com_Adr[]);
 void print_degree(uint16_t value);
-void set_memory_nr (void);
-void flash_PrgNo(void);
+void set_memory_nr(void);
+
 void startDisplaySettings(void);
 void handleDisplaySettings(void);
 void printContrast(uint8_t contrast);
 void printIllu(uint8_t illum);
+
 void triggerBacklitTimeout(void);
 void checkBacklitTimeout(void);
+
+void set_standby_mode(void);
+void clr_standby_mode(void);
+
+void lcd_clr_digit_lines(void);
+void lcd_clr_unit_display(void);
+void lcd_clr_digits(uint8_t display);
+void lcd_clr_all_digits(void);
+void lcd_clr_memory(void);
+
+void startup_calibration(void);
+
+// functions in main loop...
+void save_print_UIlimit(void);
+void UI_status_display(void);
+void readButtons(void);
+void flash_PrgNo(void);
+void Measurement(void);
+
 
 
 // global variables ------------------------------------------------------
@@ -289,37 +319,29 @@ uint32_t runtime = 0;
 
 //LCD commands -----------------------------------------------------------
 
-const uint8_t clr_Digit_Lines[] PROGMEM = {24, clr_U_underlines, clr_I_underlines};
-    
-const uint8_t Standby_on[]  PROGMEM = {10, Standby_On_cmd, set_standby, clr_active_V, clr_active_A};
-const uint8_t Standby_off[] PROGMEM = {4, Standby_Off_cmd, clr_standby};
-    
 //const uint8_t Degree_Symbol[] PROGMEM = {12, 0x23,0x02,0x31, 0x30,0x17,0x20, 0x30,0x26,0x38, 0x30,0x24,0x17};
  
-const uint8_t Activ_V[] PROGMEM = {6, set_active_V, clr_active_A};
-const uint8_t Activ_A[] PROGMEM = {6, set_active_A, clr_active_V};
-
-const uint8_t clr_Memory[] PROGMEM = {8, clr_memory, Memory_nr_cmd,0x5D,0x5D,0x5D,0x5D};
+const uint8_t UI_Activ_V[] PROGMEM = {9, set_active_V, clr_active_A, clr_standby};
+const uint8_t UI_Activ_A[] PROGMEM = {9, set_active_A, clr_active_V, clr_standby};
+const uint8_t UI_Standby[] PROGMEM = {9, set_standby,  clr_active_A, clr_active_V};
 
 const uint8_t LCD_inits[] PROGMEM = {54, set_V_symbol, set_V_point,
                                          set_A_symbol, set_A_point,
                                          set_W_symbol, set_W_point,
-                                         set_point_ulimit,
-                                         set_U_limit, set_V_Ulimit, set_point_ilimit,
+                                         set_point_ulimit, set_point_ilimit,
+                                         set_U_limit, set_V_Ulimit, 
                                          set_I_limit, set_A_Ilimit, 
-                                         set_U2_underline,    
+                                         set_U2_underline,
                                          U_act_cmd,0x5D,0x50,0x50,0x50,  
                                          I_act_cmd,0x50,0x50,0x50,0x50, 
                                          P_act_cmd,0x50,0x50,0x50,0x50};
 
+const uint8_t clr_underlines[] PROGMEM = {24, clr_U_underlines, clr_I_underlines};
+
 const uint8_t restore_unit_display[] PROGMEM = {15, set_V_symbol, set_A_symbol, set_W_symbol, set_V_point, set_A_point, set_W_point };
 const uint8_t clr_unit_display[]     PROGMEM = {15, clr_V_symbol, clr_A_symbol, clr_W_symbol, clr_V_point, clr_A_point, clr_W_point };
 
-const uint8_t clr_all_digits[] PROGMEM = { 15, U_act_cmd,0x5D, 0x5D, 0x5D, 0x5D,
-                                               I_act_cmd,0x5D, 0x5D, 0x5D, 0x5D,
-                                               P_act_cmd,0x5D, 0x5D, 0x5D, 0x5D };
-
-const uint8_t illu_values[] PROGMEM = { 0, 1, 5, 10, 30, 60};
+const uint8_t illu_values[] = { 0, 1, 5, 10, 30, 60, 120, 240 };
 
 //*************************************************************************
 // soft delay
@@ -350,10 +372,10 @@ void init_SPI(void)
 }
 
 //*************************************************************************
-// SPI write
+// SPI write one byte
 //*************************************************************************
-void SPI_wr2(unsigned char dataout)
-{		
+void wr_SPI_buffer1(uint8_t dataout)
+{
     SPDR = dataout;
     while(!(SPSR & (1<<SPIF)));
     while(PINB & (1<<SPI_MISO));
@@ -364,30 +386,22 @@ void SPI_wr2(unsigned char dataout)
 //*************************************************************************
 void wr_SPI_buffer3(uint8_t data0, uint8_t data1, uint8_t data2)
 {
-    SPI_wr2(data0);
-    SPI_wr2(data1);
-    SPI_wr2(data2);
-}
-
-void wr_SPI_buffer4(uint8_t data0, uint8_t data1, uint8_t data2, uint8_t data3)
-{
-    SPI_wr2(data0);
-    SPI_wr2(data1);
-    SPI_wr2(data2);
-    SPI_wr2(data3);
+    wr_SPI_buffer1(data0);
+    wr_SPI_buffer1(data1);
+    wr_SPI_buffer1(data2);
 }
 
 void wr_SPI_buffer5(uint8_t data0, uint8_t data1, uint8_t data2, uint8_t data3, uint8_t data4)
 {
-    SPI_wr2(data0);
-    SPI_wr2(data1);
-    SPI_wr2(data2);
-    SPI_wr2(data3);
-    SPI_wr2(data4);
+    wr_SPI_buffer1(data0);
+    wr_SPI_buffer1(data1);
+    wr_SPI_buffer1(data2);
+    wr_SPI_buffer1(data3);
+    wr_SPI_buffer1(data4);
 }
 
 //*************************************************************************
-// init Timer1   14Bit/500Hz PWM mode (voltage and curent controll)
+// init Timer1   14Bit/500Hz PWM mode (voltage and cufrent control)
 //*************************************************************************
 void init_Timer1(void)
 {
@@ -451,55 +465,69 @@ void init_IO_Port(void)
 //*************************************************************************
 // print values on screen
 //*************************************************************************
+void get_digits(uint16_t value, uint8_t digits[])
+{
+    for (uint8_t i=0; i<4; i++)
+    {
+        digits[i] = value % 10 + 0x50;
+        value /= 10;
+    }
+}
+
+void print_digits(uint8_t cmd, uint8_t digits[])
+{
+    wr_SPI_buffer1(cmd);
+    for (uint8_t i=0; i<4; i++)
+        wr_SPI_buffer1(digits[i]);
+}
+
 void print_value(uint8_t cmd_index, uint16_t value)
 {
-    uint8_t print_leading_space = 0;
-    uint8_t digit[4];
+    uint8_t digits[4];
     if (cmd_index == U_act_cmd || cmd_index == U_limit_cmd)
     {
         value /= 10;
-        print_leading_space = 1;
     }
 
-    digit[0] = (value/1000)+0x50;
-    if ((print_leading_space || cmd_index == P_act_cmd) && digit[0] == 0x50)
+    get_digits(value, digits);
+
+    if (((cmd_index == U_act_cmd || cmd_index == U_limit_cmd) || cmd_index == P_act_cmd) && digits[3] == 0x50)
     {
-        digit[0] = 0x5D;	// if first digit 0 than print "Space"
+        digits[3] = 0x5D;    // if first digit 0 than print "Space"
     }
     
-    value %= 1000;
-    digit[1] = (value/100)+0x50;
-    value %= 100;
-    digit[2] = (value/10)+0x50;
-    value %= 10;
-    digit[3] = (value/1)+0x50;
-    
-    wr_SPI_buffer5(cmd_index, digit[3], digit[2], digit[1], digit[0]);
+    print_digits(cmd_index, digits);
 }
 
 void print_value_signed(uint8_t cmd_index, int16_t value)
 {
-    uint8_t digit[4];
-    if (value < 0)
-    {
-        value = -value;
-        digit[0] = 0x5F;
-    }
-    else
-    {
-        digit[0] = 0x5D;
-    }
+    uint8_t digits[4];
 
-    value %= 1000;
-    digit[1] = (value/100)+0x50;
-    if (digit[1]==0x50) digit[1] = 0x5D;
-    value %= 100;
-    digit[2] = (value/10)+0x50;
-    if (digit[2]==0x50) digit[2] = 0x5D;
-    value %= 10;
-    digit[3] = (value/1)+0x50;
+    get_digits(abs(value), digits);
     
-    wr_SPI_buffer5(cmd_index, digit[3], digit[2], digit[1], digit[0]);
+    // replace leading zeros
+    if (digits[3]==0x50) 
+    {
+        digits[3] = 0x5D;
+        if (digits[2]==0x50)
+        {
+            digits[2] = 0x5D;
+            if (digits[1]==0x50)
+            {
+                digits[1] = 0x5D;
+            }
+        }            
+    }        
+
+    // print "-"
+    if (value<0)
+    {
+        if      (value >-10)  digits[1] = 0x5f;
+        else if (value >-100) digits[2] = 0x5f;
+        else                  digits[3] = 0x5f;
+    }
+    
+    print_digits(cmd_index, digits);
 }
 
 //*************************************************************************
@@ -513,9 +541,9 @@ void print_memory_nr (uint8_t number)
 //*************************************************************************
 // print temperature
 //*************************************************************************
-void print_degree(uint16_t value) // 9700
+void print_degree(uint16_t value)
 {
-    value /= 100;                 // 97
+    value /= 100;                // print only 2-digit integer
     wr_SPI_buffer5(Memory_nr_cmd, 0x5D, 0x5D,(value%10)+0x50, (value/10)+0x50);
 }
 
@@ -580,7 +608,7 @@ ISR(TIMER2_OVF_vect)
         PORTD |= AD_input_None;
     }
    
-    runtime++;   // 256*4us = 1.024ms plus the time the timer is not running...
+    runtime++;  // 256*4us = 1.024ms plus the time the timer is not running...
                 // measured: 1.16ms; use 1000/1.16 = 862 as a divider to get seconds (pi*thumb)
     if (runtime%TICKS_PER_SECOND == 0)
     {
@@ -613,7 +641,7 @@ void print_P_calculation(void)
 //*************************************************************************
 void print_U_result(uint16_t meas_time)
 {
-    if (Standby_flag == 1 || meas_time <= meas_counts_offset_0V)
+    if (Standby_flag || meas_time <= meas_counts_offset_0V)
     {
         print_value(U_act_cmd, 0);
         print_value(P_act_cmd, 0);
@@ -632,9 +660,7 @@ void print_U_result(uint16_t meas_time)
 //*************************************************************************
 void print_I_result(uint16_t meas_time)
 {
-    #define Digital_offset_a 260
-    
-    if (Standby_flag == 1 || meas_time <= meas_counts_offset_0mA) 
+    if (Standby_flag || meas_time <= meas_counts_offset_0mA) 
     {
         print_value(I_act_cmd, 0);
         print_value(P_act_cmd, 0);
@@ -668,15 +694,12 @@ void print_T_heatsink_result(uint16_t meas_time)
     // heat alert
     if (result >= 75)
     {
-        wr_SPI_buffer4(Standby_On_cmd, set_standby);
-        Standby_flag = 1;
-        return;
+        set_standby_mode();
     }
     else if (result >= 70)
     {
         wr_SPI_buffer3(set_overtemp);
-        OCR0A = 255;		// set max Fan PWM
-        return;
+        OCR0A = 255;    // set max Fan PWM
     }
     else if (result < 69)
     {
@@ -684,7 +707,7 @@ void print_T_heatsink_result(uint16_t meas_time)
         
         if (result <= 35)
         {
-            OCR0A = 20;		// set min Fan PWM
+            OCR0A = 20; // set min Fan PWM
         }
         else
         {
@@ -817,22 +840,20 @@ void Measurement(void)
             
         if (!displaySettingsActive)
         {
-            if (Meas_type == MEAS_TYPE_U)
+            if (enc_changed == FALSE && Hold_time == 0)
             {
-                if (enc_changed == FALSE && Hold_time == 0)
+                if (Meas_type == MEAS_TYPE_U)
                 {
                     print_U_result(meas_time);
                 }
-            }
-            
-            if (Meas_type == MEAS_TYPE_I)
-            {
-                if (enc_changed == FALSE && Hold_time == 0)
+                            
+                if (Meas_type == MEAS_TYPE_I)
                 {
                     print_I_result(meas_time);
                 }
             }
         }
+        
         if (Meas_type == MEAS_TYPE_T_TRANSFORMER)
         {
             print_T_transformer_result(meas_time);
@@ -980,7 +1001,7 @@ void set_UI_Limits(void)
 //*************************************************************************
 // set memory number
 //*************************************************************************
-void set_memory_nr (void)
+void set_memory_nr(void)
 {
     // read encoder ------------------------------------------------------
     int diff = encode_read4();
@@ -1035,10 +1056,10 @@ void set_Usoll (int16_t value)
     OCR1A = calib_counts_offset_0V + ((value * calib_factor) >> 16);
     
     if (value >= 15000) {
-        SPI_wr2(Relais_On_48V);
+        wr_SPI_buffer1(Relais_On_48V);
     }
     else if (value <= 14500) {
-        SPI_wr2(Relais_Off_24V);
+        wr_SPI_buffer1(Relais_Off_24V);
     }
     
     print_value(U_act_cmd, value);
@@ -1054,6 +1075,16 @@ void set_Isoll (int16_t value)
     OCR1B = calib_counts_offset_0mA + ((value * calib_factor) >> 16);
 
     print_value(I_act_cmd, value);
+}
+
+//*************************************************************************
+// clear complete EEPROM (EEPROM addr. 0x00-0x5f)
+//*************************************************************************
+void clr_eeprom(void)
+{
+    uint16_t *eeAddr = (uint16_t*) 0;
+    for (uint8_t i=0; i<0x30; i++)
+        eeprom_write_word(eeAddr+i, 0);
 }
 
 //*************************************************************************
@@ -1097,7 +1128,7 @@ uint16_t read_eeprom_ilimit (void)
 //*************************************************************************
 void save_eeprom_display_settings(uint8_t contrast, uint8_t backlit)
 {
-    uint16_t *eeAddr = (uint16_t*) 0x08;
+    uint16_t *eeAddr = (uint16_t*) 0x04;
     uint16_t word = (contrast & 0x07) | (backlit & 0x07)<<4 | DISPLAY_MAGIC_WORD;
     eeprom_write_word(eeAddr, word);
 }
@@ -1107,7 +1138,7 @@ void save_eeprom_display_settings(uint8_t contrast, uint8_t backlit)
 //*************************************************************************
 void read_eeprom_display_settings(uint8_t *contrast, uint8_t *backlit)
 {
-    uint16_t *eeAddr = (uint16_t*) 0x08;
+    uint16_t *eeAddr = (uint16_t*) 0x04;
     uint16_t word = eeprom_read_word(eeAddr);
     if ((word & 0xff00) == DISPLAY_MAGIC_WORD)
     {
@@ -1221,15 +1252,55 @@ void setDigitPos (void)
 }
 
 //*************************************************************************
-// send LCD commands
+// LCD functions
 //*************************************************************************
-void send_LCD_commands (const uint8_t Com_Adr[])
+void send_LCD_commands(const uint8_t Com_Adr[])
 {
     uint8_t counts = pgm_read_byte(Com_Adr);
     for (uint8_t i = 1; i <= counts; i++)
     {
-        SPI_wr2(pgm_read_byte(Com_Adr + i));
+        wr_SPI_buffer1(pgm_read_byte(Com_Adr + i));
     }
+}
+
+void set_standby_mode(void)
+{
+    wr_SPI_buffer1(Standby_On_cmd);
+    Standby_flag = TRUE;
+}    
+
+void clr_standby_mode(void)
+{
+    wr_SPI_buffer1(Standby_Off_cmd);
+    Standby_flag = FALSE;
+}
+
+void lcd_clr_digit_lines(void)
+{
+    send_LCD_commands(clr_underlines);
+}
+
+void lcd_clr_unit_display(void)
+{
+    send_LCD_commands(clr_unit_display);
+}
+
+void lcd_clr_digits(uint8_t display)
+{
+    wr_SPI_buffer5(display, 0x5D, 0x5D, 0x5D, 0x5D);
+}
+
+void lcd_clr_all_digits(void)
+{
+    lcd_clr_digits(U_act_cmd);
+    lcd_clr_digits(I_act_cmd);
+    lcd_clr_digits(P_act_cmd);
+}
+
+void lcd_clr_memory(void)
+{
+    wr_SPI_buffer3(clr_memory);
+    lcd_clr_digits(Memory_nr_cmd);
 }
 
 //*************************************************************************
@@ -1238,12 +1309,11 @@ void send_LCD_commands (const uint8_t Com_Adr[])
 void buttonFunction (uint8_t button)
 {
     // if panel is locked, the only key we care for is setting to standby
-    if (panel_locked && (button == BUTTON_STANDBY) && (Standby_flag == 0))
+    if (panel_locked && (button == BUTTON_STANDBY) && !Standby_flag)
     {
-         send_LCD_commands(Standby_on);
          set_Usoll(0);
          set_Isoll(0);
-         Standby_flag = 1;
+         set_standby_mode();
          return;
     }
 
@@ -1255,7 +1325,7 @@ void buttonFunction (uint8_t button)
                 save_eeprom_display_settings(contrast, backlit);
 
                 send_LCD_commands(restore_unit_display);
-                send_LCD_commands(clr_Digit_Lines);
+                lcd_clr_digit_lines();
                 setDigitPos();
                 displaySettingsActive = FALSE;
                 break;
@@ -1281,18 +1351,15 @@ void buttonFunction (uint8_t button)
         {
             // Standby on -------------------------------------------------------- 
             if (Standby_flag == 0) {
-                send_LCD_commands(Standby_on);
+                set_standby_mode();
                 set_Usoll(0);
                 set_Isoll(0);
-                Standby_flag = 1;
             }
             else // Standby off -------------------------------------------------------
             {
                 set_Usoll(Ulimit);
                 set_Isoll(Ilimit);
-                send_LCD_commands(Standby_off);
-                send_LCD_commands(Activ_V);
-                Standby_flag = 0;
+                clr_standby_mode();
              }                    
         }
         break;            
@@ -1309,7 +1376,7 @@ void buttonFunction (uint8_t button)
                 // Ampere digit Up "<--"
                 if (Multiplier_I < 1000) Multiplier_I *=  10;
             }                
-            send_LCD_commands(clr_Digit_Lines);
+            lcd_clr_digit_lines();
             setDigitPos();
         }
         break;
@@ -1326,14 +1393,14 @@ void buttonFunction (uint8_t button)
                 // Ampere digit Down "-->"
                 if (Multiplier_I > 1) Multiplier_I /= 10;
             }                                    
-            send_LCD_commands(clr_Digit_Lines);
+            lcd_clr_digit_lines();
             setDigitPos();
         } 
         break;
     
         case BUTTON_UI:
         {
-            send_LCD_commands(clr_Digit_Lines);
+            lcd_clr_digit_lines();
             UI_flag = UI_flag == UI_FLAG_U ? UI_FLAG_I : UI_FLAG_U;
             setDigitPos();
         }
@@ -1350,7 +1417,7 @@ void buttonFunction (uint8_t button)
             }
             else
             {
-                send_LCD_commands(clr_Memory);
+                lcd_clr_memory();
                 print_value(U_limit_cmd, Ulimit);
                 print_value(I_limit_cmd, Ilimit);
                 Recall_flag = FALSE;
@@ -1370,7 +1437,7 @@ void buttonFunction (uint8_t button)
             }
             else
             {
-                send_LCD_commands(clr_Memory);
+                lcd_clr_memory();
                 Memory_flag = FALSE;
             }
             Recall_flag = FALSE;
@@ -1396,7 +1463,7 @@ void buttonFunction (uint8_t button)
                 {
                     wr_eeprom_memory(Memory_nr, Ulimit, Ilimit);
                 }
-                send_LCD_commands(clr_Memory);
+                lcd_clr_memory();
                 Memory_flag = FALSE;
                 Recall_flag = FALSE;
             }
@@ -1423,7 +1490,7 @@ void flash_PrgNo (void)
         if (blinki_flag != 0)
         {
             print_memory_nr(Memory_nr);
-            if (Recall_flag != 0)
+            if (Recall_flag)
             {
                 int16_t ilim;
                 int16_t ulim;
@@ -1434,11 +1501,11 @@ void flash_PrgNo (void)
         }
         else
         {
-            wr_SPI_buffer5(Memory_nr_cmd, 0x5D, 0x5D, 0x5D, 0x5D);
-            if (Recall_flag != 0)
+            lcd_clr_digits(Memory_nr_cmd);
+            if (Recall_flag)
             {
-                wr_SPI_buffer5(U_limit_cmd, 0x5D, 0x5D, 0x5D, 0x5D);
-                wr_SPI_buffer5(I_limit_cmd, 0x5D, 0x5D, 0x5D, 0x5D);
+                lcd_clr_digits(U_limit_cmd);
+                lcd_clr_digits(I_limit_cmd);
             }
         }
         blinki_flag = !blinki_flag;
@@ -1460,16 +1527,36 @@ void longPressButton (uint8_t b)
         if ((buttonPressEvent[BUTTON_LEFT]  == BUTTON_LONGPRESS_FLAG ) && 
             (buttonPressEvent[BUTTON_RIGHT] == BUTTON_LONGPRESS_FLAG))
         {
-            if (panel_locked)
+            if (buttonPressEvent[BUTTON_ENTER] != 0)
             {
-                wr_SPI_buffer3(clr_locked);
-                panel_locked = FALSE;
+                // any useful function?
+            }
+            else if (buttonPressEvent[BUTTON_MEMORY] != 0)
+            {
+                // user feedback on display
+                for (uint8_t i=0; i<10; i++)
+                {
+                    wr_SPI_buffer3(set_memory);
+                    soft_delay(200);
+                    wr_SPI_buffer3(clr_memory);
+                    soft_delay(200);
+                }
+                clr_eeprom();
             }
             else
-            {            
-                wr_SPI_buffer3(set_locked);
-                panel_locked = TRUE;
-            }            
+            {
+                // Panel lock function
+                if (panel_locked)
+                {
+                    wr_SPI_buffer3(clr_locked);
+                    panel_locked = FALSE;
+                }
+                else
+                {
+                    wr_SPI_buffer3(set_locked);
+                    panel_locked = TRUE;
+                }
+            }                
         }
     }
 }
@@ -1478,7 +1565,7 @@ void triggerBacklitTimeout(void)
 {
     if (backlitState == 0)
     {
-        SPI_wr2(Backlit_on_cmd);
+        wr_SPI_buffer1(Backlit_on_cmd);
         backlitState = 1;
     }
     lastButtonActivity = runtime;
@@ -1486,13 +1573,13 @@ void triggerBacklitTimeout(void)
 
 void checkBacklitTimeout(void)
 {
-    uint8_t backlitTimeoutInSeconds = pgm_read_byte(illu_values + backlit) * 60;
+    uint16_t backlitTimeoutInSeconds = illu_values[backlit] * 60;
     
     if ( backlitTimeoutInSeconds &&
          backlitState &&
          (runtime-lastButtonActivity)/TICKS_PER_SECOND > backlitTimeoutInSeconds )
     {
-        SPI_wr2(Backlit_off_cmd);
+        wr_SPI_buffer1(Backlit_off_cmd);
         backlitState = 0;
     }
 }
@@ -1536,7 +1623,7 @@ void releaseButton (uint8_t b)
 }
 
 //*************************************************************************
-// read Button Pins
+// read Buttons and Encoder
 //*************************************************************************
 void readButtons(void)
 {
@@ -1576,29 +1663,45 @@ void readButtons(void)
         pressButton(BUTTON_ENTER);
     else 
         releaseButton(BUTTON_ENTER);
+
+    pull_encoder();
 }
 
 //*************************************************************************
-// set UI "Aktive"
+// set UI "Active"
 //*************************************************************************
-void UI_control(void)
+void UI_status_display(void)
 {
-    static uint8_t status_old = UI_FLAG_U;
+    static uint8_t status_old = 0xff;       // force update on first iteration
+    uint8_t status;
     
-    uint8_t status = PIND & (1<<Regulator);
-    
-    if (status == status_old || Standby_flag == 1)
+    if (Standby_flag)
+    {
+        status = UI_STATUS_STANDBY;
+    }
+    else
+    {
+        status = PIND & (1<<Regulator);
+    }
+        
+    if (status == status_old)
     {
         return;
     }
     
-    if (status == UI_FLAG_I)
+    switch (status)
     {
-        send_LCD_commands(Activ_A);
-    }
-    else
-    {
-        send_LCD_commands(Activ_V);
+        case UI_STATUS_U:
+            send_LCD_commands(UI_Activ_V);
+            break;
+
+        case UI_STATUS_I:
+            send_LCD_commands(UI_Activ_A);
+            break;
+
+        case UI_STATUS_STANDBY:
+            send_LCD_commands(UI_Standby);
+            break;
     }
     
     status_old = status;
@@ -1610,9 +1713,9 @@ void UI_control(void)
 //*************************************************************************
 void display_fw_version(void)
 {
-    send_LCD_commands(clr_Digit_Lines);
-    send_LCD_commands(clr_unit_display);
-    send_LCD_commands(clr_all_digits);
+    lcd_clr_digit_lines();
+    lcd_clr_unit_display();
+    lcd_clr_all_digits();
     wr_SPI_buffer3(set_V_point);
     print_value(U_act_cmd, VERSION*10);
     print_value_signed(I_act_cmd, BUILD);
@@ -1624,21 +1727,18 @@ void display_fw_version(void)
 void init_LCD (void)
 {
     uint8_t contrast, backlit;
+    
     soft_delay(1000);
-    SPI_wr2(Clear_Screen_cmd);
+    wr_SPI_buffer1(Clear_Screen_cmd);
+    
     read_eeprom_display_settings(&contrast, &backlit);
-    SPI_wr2(backlit ? Backlit_on_cmd : Backlit_off_cmd);
-    SPI_wr2(LCD_Contrast_cmd+contrast);
-    soft_delay(100);
-    SPI_wr2(Relais_Off_24V);
-    SPI_wr2(Standby_On_cmd);
-    soft_delay(100);
-
+    wr_SPI_buffer1(backlit ? Backlit_on_cmd : Backlit_off_cmd);
+    wr_SPI_buffer1(LCD_Contrast_cmd+contrast);
+    
     display_fw_version();
     soft_delay(3000);
     
     send_LCD_commands(LCD_inits);
-    send_LCD_commands(Standby_on);
 }
 
 //*************************************************************************
@@ -1653,14 +1753,11 @@ void init_UIlimits (void)
     
     Ilimit = read_eeprom_ilimit();
     print_value(I_limit_cmd, Ilimit);
-
-    Standby_flag = 1;
-    set_Usoll(0);
-    set_Isoll(0);
-    setDigitPos();
-    
 }
 
+//*************************************************************************
+// calibration functions
+//*************************************************************************
 int16_t calibration_user(uint8_t ui_flag)
 {
     uint16_t ocrval_start = ui_flag == UI_FLAG_U ? OCR1A : OCR1B;
@@ -1678,7 +1775,7 @@ int16_t calibration_user(uint8_t ui_flag)
         print_value_signed(I_act_cmd, ocrval_diff);
     } while ((PINC & (1<<B_Enter)) != 0);
     
-    wr_SPI_buffer5(I_act_cmd, 0x5d, 0x5d, 0x5d, 0x5d);
+    lcd_clr_digits(I_act_cmd);
     soft_delay(300);
     print_value_signed(I_act_cmd, ocrval_diff);
     soft_delay(1000);
@@ -1695,55 +1792,34 @@ void wait_for_standby_off(void)
         wr_SPI_buffer3(clr_standby);
         soft_delay(200);
     } while ((PINC & (1<<B_Standby)) != 0);
-    send_LCD_commands(Standby_off);
+    clr_standby_mode();
 }    
 
-//*************************************************************************
-// Check calibration
-//*************************************************************************
-void startup_calibration(void)
+void calibrate_U(void)
 {
-    if (is_calibration_valid())
-    {
-        read_calibration_data();
-    }
-    
-    if ((!is_calibration_valid()) || ((PINC & ((1<<B_Left) | (1<<B_Right))) == 0))
-    {
         const uint16_t u_ref_low = 5000;
         const uint16_t u_ref_high = 25000;
-        const uint16_t i_ref_low = 300;     // use a 12V/5W car bulb as load
-        const uint16_t i_ref_high = 1500;   // use a 12V/21W car bulb as load
         
-        SPI_wr2(Clear_Screen_cmd);
-        wr_SPI_buffer3(set_V_Ulimit);
-        wr_SPI_buffer3(set_A_Ilimit);
+        uint16_t u_refs[] = { u_ref_low, u_ref_high };
+        uint16_t ocrs[] = { 0, 0 };
+        uint16_t u_meas[2];
         
         // Limit current to 100mA; calibration should be done in idle anyway
         set_Isoll(100);
         print_value(I_limit_cmd, 100);
 
-        uint16_t u_refs[] = { u_ref_low, u_ref_high };
-        uint16_t i_refs[] = { i_ref_low, i_ref_high };
-        uint16_t ocrs[] = { 0, 0, 0 };
-        uint16_t u_meas[2];
-        uint16_t i_meas[2];
-        
-        //wr_SPI_buffer5(P_act_cmd, 0x5D, 0x5D, 0x5D, 0x5D); // Clr P display
-            
-        // Voltage calibration
         for (uint8_t i=0; i<2; i++)
         {
-            send_LCD_commands(Standby_on);
+            set_standby_mode();
             wr_SPI_buffer3(set_V_symbol);
 
             set_Usoll(u_refs[i]);
             wr_SPI_buffer5(U_act_cmd, 0x51+i, 0x5B, 0x5A ,0x5C);    // "CAL1/2"
             print_value(U_limit_cmd, u_refs[i]);
-            wr_SPI_buffer5(I_act_cmd, 0x5D, 0x5D, 0x5D, 0x5D);      // Clr I display
+            lcd_clr_digits(I_act_cmd);
 
             wait_for_standby_off();
-            send_LCD_commands(Activ_V);
+            send_LCD_commands(UI_Activ_V);
             wr_SPI_buffer3(set_I4_underline);
 
             soft_delay(200);
@@ -1757,25 +1833,34 @@ void startup_calibration(void)
 
         meas_counts_per_20V = u_meas[1] - u_meas[0];
         meas_counts_offset_0V = u_meas[0] - meas_counts_per_20V / 4;
+}
 
-        // Current calibration
-        set_Usoll(12000);           // 12V
-        SPI_wr2(Relais_Off_24V);
+void calibrate_I(void)
+{
+        const uint16_t i_ref_low = 300;     // use a 12V/5W car bulb as load
+        const uint16_t i_ref_high = 1500;   // use a 12V/21W car bulb as load
+        
+        uint16_t i_refs[] = { i_ref_low, i_ref_high };
+        uint16_t ocrs[] = { 0, 0 };
+        uint16_t i_meas[2];
+        
+        // Use 12V for usage with bulbs
+        set_Usoll(12000);
         print_value(U_limit_cmd, 12000);
 
         for (uint8_t i=0; i<2; i++)
         {
-            send_LCD_commands(Standby_on);
+            set_standby_mode();
             wr_SPI_buffer3(clr_V_symbol);
             wr_SPI_buffer3(set_A_symbol);
 
             set_Isoll(i_refs[i]);
             wr_SPI_buffer5(U_act_cmd, 0x53+i, 0x5B, 0x5A ,0x5C);    // "CAL3/4"
             print_value(I_limit_cmd, i_refs[i]);
-            wr_SPI_buffer5(I_act_cmd, 0x5D, 0x5D, 0x5D, 0x5D);      // Clr I display
+            lcd_clr_digits(I_act_cmd);
 
             wait_for_standby_off();
-            send_LCD_commands(Activ_A);
+            send_LCD_commands(UI_Activ_A);
 
             soft_delay(200);
             ocrs[i] = calibration_user(UI_FLAG_I);
@@ -1788,12 +1873,28 @@ void startup_calibration(void)
 
         meas_counts_per_1200mA = i_meas[1] - i_meas[0];
         meas_counts_offset_0mA = i_meas[0] - meas_counts_per_1200mA / 4;
+}
 
+void startup_calibration(void)
+{
+    if (is_calibration_valid())
+    {
+        read_calibration_data();
+    }
+    
+    if ((!is_calibration_valid()) || ((PINC & ((1<<B_Left) | (1<<B_Right))) == 0))
+    {
+        wr_SPI_buffer1(Clear_Screen_cmd);
+        wr_SPI_buffer3(set_V_Ulimit);
+        wr_SPI_buffer3(set_A_Ilimit);
+        
+        calibrate_U();
+        calibrate_I();
         save_calibration_data();
     }
     
     send_LCD_commands(LCD_inits);
-    send_LCD_commands(Standby_on);
+    set_standby_mode();
 
     return;
 }
@@ -1807,15 +1908,15 @@ void printContrast(uint8_t contrast)
 void printIllu(uint8_t illum)
 {
     wr_SPI_buffer5(U_act_cmd, 0x5d, 0x5b, 0x5b, 0x51);
-    print_value_signed(I_act_cmd,  pgm_read_byte(illu_values + illum));
+    print_value_signed(I_act_cmd,  illu_values[illum]);
 }
 
     
 void startDisplaySettings(void)
 {
-    send_LCD_commands(clr_unit_display);
-    send_LCD_commands(clr_Digit_Lines);
-    send_LCD_commands(clr_all_digits);
+    lcd_clr_unit_display();
+    lcd_clr_digit_lines();
+    lcd_clr_all_digits();
     wr_SPI_buffer3(set_I4_underline);
 
     read_eeprom_display_settings(&contrast, &backlit);
@@ -1835,22 +1936,22 @@ void handleDisplaySettings(void)
         if (diff > 0 && contrast < 7)
         {
             contrast++;
-            SPI_wr2(LCD_Contrast_cmd + contrast);
+            wr_SPI_buffer1(LCD_Contrast_cmd + contrast);
             printContrast(contrast);
         }
         else if (diff < 0 && contrast > 0)
         {
             contrast--;
-            SPI_wr2(LCD_Contrast_cmd + contrast);
+            wr_SPI_buffer1(LCD_Contrast_cmd + contrast);
             printContrast(contrast);
         }
     }
     else
     {
-        if ((diff > 0) && (backlit < 5))
+        if ((diff > 0) && (backlit < 7))
         {
             backlit++;
-            SPI_wr2(Backlit_on_cmd);
+            wr_SPI_buffer1(Backlit_on_cmd);
             printIllu(backlit);
             
         }
@@ -1859,7 +1960,7 @@ void handleDisplaySettings(void)
             backlit--;
             if (backlit == 0)
             {
-                SPI_wr2(Backlit_off_cmd);
+                wr_SPI_buffer1(Backlit_off_cmd);
             }
             printIllu(backlit);
         }
@@ -1883,17 +1984,17 @@ int main(void)
     startup_calibration();
 
     init_UIlimits();
-            
+    set_standby_mode();
+
     // Main loop ---------------------------------------------------------
     while(TRUE) 
-    {	
+    {
         save_print_UIlimit();
-        UI_control();
-        pull_encoder();
+        UI_status_display();
         readButtons();
         flash_PrgNo();
         Measurement();
         if (displaySettingsActive)
             handleDisplaySettings();
-    }	
+    }
 }

@@ -23,15 +23,21 @@ WORKING:
 - Measure transformer temperature
 - Menu with LCD contrast/backlit settings
 - Calibration of internal ADC measurements
+- Timeout for Display-Settings-Menu
 
 NICE TO HAVE:
 - Calibration of temperature sensor
 - Temperature compensation (if needed)
+- Key-combination for viewing calibration values
 
 IDEAS with hardware modifications:
 - serial remote control (needs re-wiring of button input pins)
 
 ## HISTORY
+
+ - 199b9
+    - code cleanup, reduce flash footprint
+    - Key-combination <-,-> and MEMORY for zeroing EEPROM -> resets calibration and all user settings
 
  - 199b8
     - added panel lock funtion (long-press "<-" and "->" simultaneously for toggling) like in original firmware
